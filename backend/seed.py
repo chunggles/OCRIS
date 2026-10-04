@@ -34,7 +34,7 @@ def main():
             role=role, employee_id=employee_id, assigned_grade=grade, assigned_section=section,
         )
         print(f'  Created: {username} ({role})')
-    print(f'\nDone. Login: k.saquing / {DEFAULT_PASSWORD}')
+    print('\nDone. Log in as k.saquing with SEED_PASSWORD.')
 
 
 if __name__ == '__main__':
