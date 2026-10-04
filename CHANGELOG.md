@@ -115,7 +115,7 @@ Upload filenames used to be saved as-is, so a second upload called `scan.jpg` ov
 | File | Change |
 |---|---|
 | `frontend/src/pages/UploadPage.jsx` | The **Section** dropdown in Step 1 is now a text box (placeholder "e.g. Sampaguita"). The value is trimmed, and an empty or spaces-only section is rejected. The unused `SECTIONS` import was removed. |
-| `frontend/src/pages/LoginPage.jsx` | Removed the hardcoded demo login (`k.saquing` / `password123`). Both fields start empty, with `autoComplete` set to discourage browser autofill. |
+| `frontend/src/pages/LoginPage.jsx` | Removed the hardcoded demo login (`k.saquing`). Both fields start empty, with `autoComplete` set to discourage browser autofill. |
 
 ---
 

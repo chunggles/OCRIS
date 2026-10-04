@@ -8,7 +8,8 @@ django.setup()
 
 from api.models import OCRISUser  # noqa: E402  (needs django.setup() first)
 
-DEFAULT_PASSWORD = 'password123'
+# Set SEED_PASSWORD in backend/.env (loaded by settings.py).
+DEFAULT_PASSWORD = os.environ.get('SEED_PASSWORD')
 
 # username, first name, last name, role, assigned grade, assigned section, employee ID
 USERS = [
@@ -21,6 +22,8 @@ USERS = [
 
 
 def main():
+    if not DEFAULT_PASSWORD:
+        raise SystemExit('SEED_PASSWORD is not set. Add it to backend/.env.')
     print('Seeding OCRIS users...')
     for username, first, last, role, grade, section, employee_id in USERS:
         if OCRISUser.objects.filter(username=username).exists():
