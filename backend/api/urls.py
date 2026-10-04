@@ -1,0 +1,33 @@
+from django.urls import path
+
+from .views import analytics, audit, auth, ocr, records, users
+
+urlpatterns = [
+    # Auth
+    path('auth/login/',  auth.login_view,  name='login'),
+    path('auth/logout/', auth.logout_view, name='logout'),
+    path('auth/me/',     auth.me_view,     name='me'),
+
+    # Records
+    path('records/',                        records.records_list,   name='records-list'),
+    path('records/search/',                 records.records_search, name='records-search'),
+    path('records/<str:record_id>/',        records.record_detail,  name='record-detail'),
+    path('records/<str:record_id>/update/', records.record_update,  name='record-update'),
+    path('records/<str:record_id>/delete/', records.record_delete,  name='record-delete'),
+
+    # OCR pipeline
+    path('ocr/quality/',                  ocr.ocr_quality,  name='ocr-quality'),
+    path('ocr/upload/',                   ocr.ocr_upload,   name='ocr-upload'),
+    path('ocr/validate/',                 ocr.ocr_validate, name='ocr-validate'),
+    path('ocr/scans/<str:scan_id>/file/', ocr.scan_file,    name='scan-file'),
+    path('ocr/history/',                  ocr.scan_history, name='scan-history'),
+
+    # Analytics
+    path('analytics/', analytics.analytics_dashboard, name='analytics'),
+
+    # Users & audit
+    path('users/',               users.users_list,   name='users-list'),
+    path('users/create/',        users.users_create, name='users-create'),
+    path('users/<int:user_id>/', users.user_detail,  name='user-detail'),
+    path('audit/',               audit.audit_log,    name='audit-log'),
+]
