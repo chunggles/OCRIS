@@ -57,6 +57,9 @@ The token is returned by `POST /auth/login/`.
 | GET | `/ocr/scans/<scan_id>/file/` | Any (teachers: own class) | Download the original scan |
 | GET | `/ocr/history/` | Any (teachers: own class) | List scans |
 | GET | `/analytics/` | Any (teachers: own class) | Grade analytics |
+| GET | `/sections/` | Any | List sections |
+| POST | `/sections/create/` | OIC, Admin | Add a section |
+| PATCH, DELETE | `/sections/<section_id>/` | OIC, Admin | Edit or delete a section |
 | GET | `/users/` | OIC, Admin | List users |
 | POST | `/users/create/` | OIC | Create a user |
 | GET, PATCH, DELETE | `/users/<id>/` | OIC | View, edit or delete a user |
@@ -392,6 +395,44 @@ Access: OIC. Permanently deletes the account and its token. Records, scans and a
 | `404` | No such user |
 
 Writes a `DELETE_USER` audit entry.
+
+---
+
+## Sections
+
+The list of sections per grade level, managed on the Sections page. Records and teacher accounts store their section as plain text, so editing or deleting a section here does not change them.
+
+```json
+{
+  "section_id": "SEC-3F9A1C2B",
+  "name": "Sampaguita",
+  "grade_level": "Grade 1",
+  "created_at": "2026-10-05T02:10:00Z",
+  "updated_at": "2026-10-05T02:10:00Z"
+}
+```
+
+### GET `/sections/`
+
+Access: any. Returns an array of all sections (not paginated), ordered by grade level then name.
+
+### POST `/sections/create/`
+
+Access: OIC, Admin.
+
+```json
+{ "name": "Sampaguita", "grade_level": "Grade 1" }
+```
+
+`name` is required, at most 50 characters. `grade_level` is `Grade 1` to `Grade 6`. Response `201` with the section object, or `400` if a field is invalid or that grade level already has a section with the same name (case is ignored). Writes an `ADD_SECTION` audit entry.
+
+### PATCH `/sections/<section_id>/`
+
+Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Returns the updated section object. Writes an `EDIT_SECTION` audit entry.
+
+### DELETE `/sections/<section_id>/`
+
+Access: OIC, Admin. Response `204`, or `404` if there is no such section. Writes a `DELETE_SECTION` audit entry.
 
 ---
 

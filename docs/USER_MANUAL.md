@@ -56,6 +56,7 @@ Change the temporary password you were given the first time you sign in. If you 
 | Search | Find a pupil's record |
 | Grade Analytics | Class means, pass rates, intervention flags |
 | Scan History | Every scan that has been uploaded |
+| Sections | The sections in each grade level (OIC and Admin Staff) |
 | User Management | Accounts (OIC; Admin Staff can view) |
 | Audit Log | Who did what, and when (OIC and Admin Staff) |
 

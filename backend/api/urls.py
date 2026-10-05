@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import analytics, audit, auth, ocr, records, users
+from .views import analytics, audit, auth, ocr, records, sections, users
 
 urlpatterns = [
     # Auth
@@ -26,6 +26,11 @@ urlpatterns = [
 
     # Analytics
     path('analytics/', analytics.analytics_dashboard, name='analytics'),
+
+    # Sections ("create" must come before the <section_id> route)
+    path('sections/',                  sections.sections_list,   name='sections-list'),
+    path('sections/create/',           sections.sections_create, name='sections-create'),
+    path('sections/<str:section_id>/', sections.section_detail,  name='section-detail'),
 
     # Users & audit
     path('users/',               users.users_list,   name='users-list'),

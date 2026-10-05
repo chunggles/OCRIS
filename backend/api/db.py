@@ -46,6 +46,10 @@ def users_col():
     return get_db()['users']
 
 
+def sections_col():
+    return get_db()['sections']
+
+
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _short_id():
@@ -261,6 +265,52 @@ def sync_users_to_mongo(users):
             upsert_user_in_mongo(user)
         except Exception as e:
             logger.warning(f"User sync failed: {user.get('username')}: {e}")
+
+
+# ── Sections ─────────────────────────────────────────────────────────────────
+
+def list_sections():
+    """Every section, ordered by grade level and then by name."""
+    sections = _serialize(list(sections_col().find({}, {'_id': 0})))
+    return sorted(sections, key=lambda s: (s['grade_level'], s['name'].lower()))
+
+
+def get_section(section_id):
+    section = sections_col().find_one({'section_id': section_id}, {'_id': 0})
+    return _serialize([section])[0] if section else None
+
+
+def find_section(name, grade_level, exclude_id=None):
+    """The section with this name in this grade level, ignoring case, if there is one."""
+    query = {'name': _exact_ignoring_case(name), 'grade_level': grade_level}
+    if exclude_id:
+        query['section_id'] = {'$ne': exclude_id}
+    return sections_col().find_one(query, {'_id': 0})
+
+
+def create_section(name, grade_level):
+    section_id = f'SEC-{_short_id()}'
+    now = datetime.utcnow()
+    sections_col().insert_one({
+        'section_id':  section_id,
+        'name':        name,
+        'grade_level': grade_level,
+        'created_at':  now,
+        'updated_at':  now,
+    })
+    return section_id
+
+
+def update_section(section_id, name, grade_level):
+    sections_col().update_one({'section_id': section_id}, {'$set': {
+        'name': name,
+        'grade_level': grade_level,
+        'updated_at': datetime.utcnow(),
+    }})
+
+
+def delete_section(section_id):
+    return sections_col().delete_one({'section_id': section_id}).deleted_count > 0
 
 
 # ── Analytics ────────────────────────────────────────────────────────────────

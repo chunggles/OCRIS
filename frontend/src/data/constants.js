@@ -15,6 +15,7 @@ export const NAV_ITEMS = [
   { key: 'analytics', label: 'Grade Analytics' },
   { section: 'Admin' },
   { key: 'history',   label: 'Scan History' },
+  { key: 'sections',  label: 'Sections',        roles: STAFF },
   { key: 'users',     label: 'User Management', roles: STAFF },
   { key: 'audit',     label: 'Audit Log',       roles: STAFF },
 ]
@@ -50,6 +51,7 @@ export const PERM_MATRIX = [
   { perm: 'Validate OCR fields', oic: true, admin: true,  teacher: true },
   { perm: 'Edit or delete',      oic: true, admin: true,  teacher: false },
   { perm: 'View analytics',      oic: true, admin: true,  teacher: 'Own class' },
+  { perm: 'Manage sections',     oic: true, admin: true,  teacher: false },
   { perm: 'Manage users',        oic: true, admin: false, teacher: false },
   { perm: 'View audit log',      oic: true, admin: true,  teacher: false },
 ]
@@ -57,4 +59,5 @@ export const PERM_MATRIX = [
 export const AUDIT_BADGES = {
   LOGIN: 'b-blue', UPLOAD: 'b-blue', VALIDATE: 'b-green', EDIT: 'b-amber', DELETE: 'b-rose', DELETE_USER: 'b-rose',
   EDIT_USER: 'b-amber', RESET_PASSWORD: 'b-amber', CHANGE_PASSWORD: 'b-amber',
+  ADD_SECTION: 'b-green', EDIT_SECTION: 'b-amber', DELETE_SECTION: 'b-rose',
 }

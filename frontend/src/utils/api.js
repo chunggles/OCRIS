@@ -106,6 +106,13 @@ export const usersAPI = {
   delete: (id)       => request(`/users/${id}/`, { method: 'DELETE' }),
 }
 
+export const sectionsAPI = {
+  list:   ()         => request('/sections/'),
+  create: (data)     => request('/sections/create/', withBody('POST', data)),
+  update: (id, data) => request(`/sections/${encodeURIComponent(id)}/`, withBody('PATCH', data)),
+  delete: (id)       => request(`/sections/${encodeURIComponent(id)}/`, { method: 'DELETE' }),
+}
+
 export const auditAPI = {
   list: (page = 1) => request(`/audit/?${qs({ page })}`),
 }

@@ -10,6 +10,7 @@ import RecordsPage      from './pages/RecordsPage'
 import RecordDetailPage from './pages/RecordDetailPage'
 import SearchPage       from './pages/SearchPage'
 import AnalyticsPage    from './pages/AnalyticsPage'
+import SectionsPage     from './pages/SectionsPage'
 import UsersPage        from './pages/UsersPage'
 import AuditPage        from './pages/AuditPage'
 import HistoryPage      from './pages/HistoryPage'
@@ -22,8 +23,9 @@ const PAGES = {
   detail:    RecordDetailPage,
   search:    SearchPage,
   analytics: AnalyticsPage,
+  sections:  SectionsPage,
   users:     UsersPage,
-  audit:     AuditPage,
+  audit:    AuditPage,
   history:   HistoryPage,
 }
 

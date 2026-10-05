@@ -9,6 +9,8 @@ PROMOTED = 'Promoted'
 RETAINED = 'Retained'
 INCOMPLETE = 'Incomplete'  # no numeric finals, or a final that isn't a number
 
+GRADE_LEVELS = tuple(f'Grade {n}' for n in range(1, 7))
+
 # Pupil fields sent with an upload and stored on the scan document
 PUPIL_KEYS = ('pupil_name', 'grade_level', 'section', 'school_year', 'lrn')
 
