@@ -1,11 +1,12 @@
 import { useState, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
-import { GRADE_LEVELS, SECTIONS, SCHOOL_YEARS } from '../data/constants'
+import { GRADE_LEVELS, isStaffRole } from '../data/constants'
 import { Card, Btn, StatusBanner, EmptyState, Pager, PageHeader, RemarksBadge } from '../components/ui/index'
 import DownloadScanBtn from '../components/ui/DownloadScanBtn'
 import { recordsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { formatDate, isNA } from '../utils/format'
+import { useRecordOptions, withExtras } from '../utils/useRecordOptions'
 
 const PAGE_SIZE = 20
 const NO_FILTERS = { grade: '', section: '', school_year: '' }
@@ -20,7 +21,7 @@ function FilterSelect({ value, onChange, allLabel, options }) {
 }
 
 function RecordRow({ record: r, onDelete }) {
-  const { nav } = useApp()
+  const { nav, user } = useApp()
   const hasAvg = !isNA(r.general_average)
   return (
     <tr>
@@ -37,7 +38,7 @@ function RecordRow({ record: r, onDelete }) {
         <div className="btn-row">
           <Btn size="sm" onClick={() => nav('detail', { recordId: r.record_id })} disabled={!r.record_id}>View</Btn>
           <DownloadScanBtn scanId={r.scan_id}/>
-          {r.record_id && <Btn variant="danger" size="sm" onClick={() => onDelete(r)}>Delete</Btn>}
+          {r.record_id && isStaffRole(user?.role) && <Btn variant="danger" size="sm" onClick={() => onDelete(r)}>Delete</Btn>}
         </div>
       </td>
     </tr>
@@ -48,6 +49,7 @@ export default function RecordsPage() {
   const { nav } = useApp()
   const [page,    setPage]    = useState(1)
   const [filters, setFilters] = useState(NO_FILTERS)
+  const options = useRecordOptions()
 
   const setFilter = (key, value) => { setFilters(f => ({ ...f, [key]: value })); setPage(1) }
   const clearFilters = () => { setFilters(NO_FILTERS); setPage(1) }
@@ -62,7 +64,7 @@ export default function RecordsPage() {
   const total   = data?.total || 0
 
   const handleDelete = async (record) => {
-    if (!window.confirm(`Delete record for ${record.pupil_name}?\nThis cannot be undone.`)) return
+    if (!window.confirm(`Delete the record for ${record.pupil_name}?\nIts scanned form is deleted too. This cannot be undone.`)) return
     try {
       await recordsAPI.delete(record.record_id)
       refetch()
@@ -77,9 +79,9 @@ export default function RecordsPage() {
       <StatusBanner error={error} onRetry={refetch}/>
       <Card>
         <div className="filter-bar">
-          <FilterSelect value={filters.grade}       onChange={v => setFilter('grade', v)}       allLabel="All grades"       options={GRADE_LEVELS}/>
-          <FilterSelect value={filters.section}     onChange={v => setFilter('section', v)}     allLabel="All sections"     options={SECTIONS}/>
-          <FilterSelect value={filters.school_year} onChange={v => setFilter('school_year', v)} allLabel="All school years" options={SCHOOL_YEARS}/>
+          <FilterSelect value={filters.grade}       onChange={v => setFilter('grade', v)}       allLabel="All grades"       options={withExtras(GRADE_LEVELS, options.grade_levels)}/>
+          <FilterSelect value={filters.section}     onChange={v => setFilter('section', v)}     allLabel="All sections"     options={options.sections}/>
+          <FilterSelect value={filters.school_year} onChange={v => setFilter('school_year', v)} allLabel="All school years" options={options.school_years}/>
           <Btn size="sm" onClick={clearFilters}>Clear</Btn>
           <div className="btn-row" style={{ marginLeft: 'auto' }}>
             <Btn size="sm" onClick={refetch}>↻ Refresh</Btn>

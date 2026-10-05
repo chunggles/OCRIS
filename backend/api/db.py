@@ -1,5 +1,6 @@
 """MongoDB access for records, scans, the audit log, and the users mirror."""
 import logging
+import re
 import uuid
 from datetime import datetime
 
@@ -52,11 +53,14 @@ def _short_id():
 
 
 def _serialize(docs):
-    """Convert datetimes to ISO strings so documents are JSON-ready."""
+    """
+    Convert datetimes to ISO strings so documents are JSON-ready. Dates are stored in UTC
+    without a zone; the "Z" tells the browser so, and it then shows local (Philippine) time.
+    """
     for doc in docs:
         for key in DATE_FIELDS:
             if isinstance(doc.get(key), datetime):
-                doc[key] = doc[key].isoformat()
+                doc[key] = doc[key].isoformat() + 'Z'
     return docs
 
 
@@ -72,6 +76,18 @@ def _paginate(collection, query, sort_field, page, size=PAGE_SIZE, projection=No
 
 def _drop_empty(filters):
     return {k: v for k, v in (filters or {}).items() if v}
+
+
+def _exact_ignoring_case(text):
+    return {'$regex': f'^{re.escape(text)}$', '$options': 'i'}
+
+
+def _query(filters):
+    """Mongo query for exact-match filters. Sections are typed by hand, so their case is ignored."""
+    query = _drop_empty(filters)
+    if 'section' in query:
+        query['section'] = _exact_ignoring_case(query['section'])
+    return query
 
 
 # ── Records ──────────────────────────────────────────────────────────────────
@@ -101,20 +117,40 @@ def create_record(data):
 
 
 def get_record(record_id):
-    return records_col().find_one({'record_id': record_id}, {'_id': 0})
+    record = records_col().find_one({'record_id': record_id}, {'_id': 0})
+    return _serialize([record])[0] if record else None
 
 
 def list_records(filters=None, page=1, size=PAGE_SIZE):
-    return _paginate(records_col(), _drop_empty(filters), 'created_at', page, size)
+    return _paginate(records_col(), _query(filters), 'created_at', page, size)
 
 
 def search_records(q, filters=None, limit=50):
-    query = _drop_empty(filters)
+    query = _query(filters)
+    # The search text is matched literally, so characters like "(" can't break the query
     query['$or'] = [
-        {field: {'$regex': q, '$options': 'i'}}
+        {field: {'$regex': re.escape(q), '$options': 'i'}}
         for field in ('pupil_name', 'lrn', 'section', 'grade_level')
     ]
     return _serialize(list(records_col().find(query, {'_id': 0}).limit(limit)))
+
+
+def record_options(filters=None):
+    """The grade levels, sections and school years that saved records actually use."""
+    query = _query(filters)
+
+    def values(field):
+        return sorted(v for v in records_col().distinct(field, query) if v)
+
+    return {
+        'grade_levels': values('grade_level'),
+        'sections': values('section'),
+        'school_years': sorted(values('school_year'), reverse=True),
+    }
+
+
+def all_records():
+    return list(records_col().find({}, {'_id': 0}))
 
 
 def update_record(record_id, updates):
@@ -167,8 +203,21 @@ def mark_scan_saved(scan_id, record_id, corrections_count):
     }})
 
 
-def list_scans(page=1, size=PAGE_SIZE):
-    return _paginate(scans_col(), {}, 'created_at', page, size, projection={'ocr_fields': 0})
+def list_scans(filters=None, page=1, size=PAGE_SIZE):
+    return _paginate(scans_col(), _query(filters), 'created_at', page, size, projection={'ocr_fields': 0})
+
+
+def count_pending_scans(filters=None):
+    return scans_col().count_documents({**_query(filters), 'outcome': 'pending'})
+
+
+def pending_scans_before(cutoff):
+    """Scans uploaded before cutoff that were never saved as a record."""
+    return list(scans_col().find({'outcome': 'pending', 'created_at': {'$lt': cutoff}}, {'_id': 0, 'ocr_fields': 0}))
+
+
+def delete_scan(scan_id):
+    return scans_col().delete_one({'scan_id': scan_id}).deleted_count > 0
 
 
 # ── Audit log ────────────────────────────────────────────────────────────────
@@ -225,9 +274,8 @@ def _to_float(value):
         return None
 
 
-def get_analytics(school_year=None, grade_level=None):
-    match = _drop_empty({'school_year': school_year, 'grade_level': grade_level})
-    records = list(records_col().find(match, {'_id': 0}))
+def get_analytics(filters=None):
+    records = list(records_col().find(_query(filters), {'_id': 0}))
 
     subject_totals, subject_counts = {}, {}
     pass_counts, total_counts = {}, {}

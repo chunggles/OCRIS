@@ -1,6 +1,8 @@
 """Request parsing and response shortcuts shared by the views."""
 from rest_framework.response import Response
 
+NO_CLASS_MESSAGE = 'Your account has no class assigned yet. Ask the OIC to assign your grade and section.'
+
 
 def query_param(request, name):
     return request.query_params.get(name, '').strip()
@@ -20,3 +22,7 @@ def detail(message, status):
 
 def not_found(message='Not found.'):
     return detail(message, 404)
+
+
+def no_class_assigned():
+    return detail(NO_CLASS_MESSAGE, 403)

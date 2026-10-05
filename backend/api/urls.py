@@ -7,10 +7,12 @@ urlpatterns = [
     path('auth/login/',  auth.login_view,  name='login'),
     path('auth/logout/', auth.logout_view, name='logout'),
     path('auth/me/',     auth.me_view,     name='me'),
+    path('auth/change-password/', auth.change_password_view, name='change-password'),
 
-    # Records
-    path('records/',                        records.records_list,   name='records-list'),
-    path('records/search/',                 records.records_search, name='records-search'),
+    # Records ("search" and "options" must come before the <record_id> routes)
+    path('records/',                        records.records_list,    name='records-list'),
+    path('records/search/',                 records.records_search,  name='records-search'),
+    path('records/options/',                records.records_options, name='records-options'),
     path('records/<str:record_id>/',        records.record_detail,  name='record-detail'),
     path('records/<str:record_id>/update/', records.record_update,  name='record-update'),
     path('records/<str:record_id>/delete/', records.record_delete,  name='record-delete'),

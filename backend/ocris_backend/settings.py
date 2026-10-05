@@ -1,16 +1,26 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _env_list(name, default):
+    return [item.strip() for item in os.getenv(name, default).split(',') if item.strip()]
+
+
 # ── Core ─────────────────────────────────────────────────────────────────────
+# Safe by default: DEBUG is off unless .env turns it on, and a real SECRET_KEY is then required.
+DEV_SECRET_KEYS = ('', 'ocris-dev-key', 'change-me')
 SECRET_KEY = os.getenv('SECRET_KEY', 'ocris-dev-key')
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
-ALLOWED_HOSTS = ['*']
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+if not DEBUG and SECRET_KEY in DEV_SECRET_KEYS:
+    raise ImproperlyConfigured('Set a real SECRET_KEY in backend/.env (or set DEBUG=True for local development).')
+ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
 ROOT_URLCONF = 'ocris_backend.urls'
 WSGI_APPLICATION = 'ocris_backend.wsgi.application'
 AUTH_USER_MODEL = 'api.OCRISUser'
@@ -61,14 +71,16 @@ MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'ocris_bcs')
 # ── REST framework & CORS ────────────────────────────────────────────────────
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'api.authentication.ExpiringTokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
-CORS_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000']
+# Hours a login stays valid; signing in again restarts the clock
+TOKEN_TTL_HOURS = float(os.getenv('TOKEN_TTL_HOURS', '12'))
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
 CORS_ALLOW_CREDENTIALS = True
 CORS_EXPOSE_HEADERS = ['Content-Disposition']  # lets the frontend read download filenames
 

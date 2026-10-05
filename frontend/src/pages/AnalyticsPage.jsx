@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react'
-import { SCHOOL_YEARS, GRADE_LEVELS } from '../data/constants'
+import { GRADE_LEVELS } from '../data/constants'
 import { Card, StatCard, Badge, Btn, BarRow, FormGroup, StatusBanner, EmptyState, PageHeader } from '../components/ui/index'
 import { analyticsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { PASSING_GRADE } from '../utils/format'
+import { useRecordOptions, withExtras } from '../utils/useRecordOptions'
 
 const meanColor = (mean) => (mean >= 85 ? 'bf-blue' : mean >= PASSING_GRADE ? 'bf-amber' : 'bf-rose')
 const rateColor = (rate) => (rate >= 90 ? 'bf-green' : rate >= 80 ? 'bf-amber' : 'bf-rose')
@@ -40,6 +41,7 @@ function InterventionFlags({ flags }) {
 export default function AnalyticsPage() {
   const [schoolYear, setSchoolYear] = useState('')
   const [grade,      setGrade]      = useState('')
+  const options = useRecordOptions()
 
   const fetchAnalytics = useCallback(() => analyticsAPI.dashboard({
     ...(schoolYear && { school_year: schoolYear }),
@@ -63,13 +65,13 @@ export default function AnalyticsPage() {
           <FormGroup label="School year">
             <select className="fld fld-auto" value={schoolYear} onChange={e => setSchoolYear(e.target.value)}>
               <option value="">All years</option>
-              {SCHOOL_YEARS.map(y => <option key={y}>{y}</option>)}
+              {options.school_years.map(y => <option key={y}>{y}</option>)}
             </select>
           </FormGroup>
           <FormGroup label="Grade level">
             <select className="fld fld-auto" value={grade} onChange={e => setGrade(e.target.value)}>
               <option value="">All grades</option>
-              {GRADE_LEVELS.map(g => <option key={g}>{g}</option>)}
+              {withExtras(GRADE_LEVELS, options.grade_levels).map(g => <option key={g}>{g}</option>)}
             </select>
           </FormGroup>
           <Btn size="sm" onClick={() => { setSchoolYear(''); setGrade('') }}>Clear</Btn>

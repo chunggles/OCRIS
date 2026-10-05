@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react'
-import { GRADE_LEVELS, SCHOOL_YEARS } from '../../data/constants'
+import { GRADE_LEVELS, SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
 import { useObjectUrl } from '../../utils/useObjectUrl'
 import { formatMB } from '../../utils/format'
 
-const DEFAULT_FORM = { last_name: '', first_name: '', grade: 'Grade 5', section: '', school_year: '2024-2025', lrn: '' }
+const DEFAULT_FORM = { last_name: '', first_name: '', grade: 'Grade 5', section: '', school_year: CURRENT_SCHOOL_YEAR, lrn: '' }
 // PDFs can't be read by the OCR engine, so only images are accepted
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
 const MAX_BYTES = 20 * 1024 * 1024

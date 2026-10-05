@@ -11,6 +11,8 @@ const describe = (d = {}) => [
   d.grade && `Grade: ${d.grade}`,
   d.new_user && `New user: ${d.new_user} (${d.role})`,
   d.deleted_user && `Deleted user: ${d.deleted_user} (${d.role})`,
+  d.target_user && `User: ${d.target_user}`,
+  d.fields && `Changed: ${d.fields.join(', ')}`,
   d.confidence !== undefined && `Conf: ${d.confidence}%`,
   d.corrections !== undefined && `Corrections: ${d.corrections}`,
 ].filter(Boolean).join(' · ')

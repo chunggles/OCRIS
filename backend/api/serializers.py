@@ -3,6 +3,8 @@ from rest_framework import serializers
 
 from .models import OCRISUser
 
+MIN_PASSWORD_LENGTH = 8
+
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField()
@@ -24,16 +26,17 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = OCRISUser
         fields = [
-            'id', 'username', 'full_name', 'email', 'role', 'employee_id',
+            'id', 'username', 'full_name', 'first_name', 'last_name', 'email', 'role', 'employee_id',
             'assigned_grade', 'assigned_section', 'is_active', 'last_login',
         ]
+        read_only_fields = ['last_login']
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
 
 
 class CreateUserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8)
+    password = serializers.CharField(write_only=True, min_length=MIN_PASSWORD_LENGTH)
 
     class Meta:
         model = OCRISUser
@@ -64,3 +67,8 @@ class ValidationSubmitSerializer(serializers.Serializer):
     school_year = serializers.CharField()
     corrections = CorrectionSerializer(many=True, required=False)
     confirmed = serializers.BooleanField()
+
+    def validate_confirmed(self, value):
+        if not value:
+            raise serializers.ValidationError('Confirm that the flagged fields were checked against the form.')
+        return value

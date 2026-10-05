@@ -1,5 +1,5 @@
 import { useApp } from '../../context/AppContext'
-import { NAV_ITEMS } from '../../data/constants'
+import { navItemsFor } from '../../data/constants'
 
 const initialsOf = (name) => name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()
 
@@ -14,7 +14,7 @@ export default function Sidebar() {
         <div className="logo-sub">Bayombong Central School<br/>Record Management System</div>
       </div>
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map((item, i) => item.section
+        {navItemsFor(user?.role).map((item, i) => item.section
           ? <div key={i} className="nav-section">{item.section}</div>
           : (
             <div key={item.key} className={`nav-item${activePage === item.key ? ' active' : ''}`} onClick={() => nav(item.key)}>

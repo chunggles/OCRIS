@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { GRADE_LEVELS, SECTIONS, ROLES } from '../../data/constants'
+import { ROLES } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
 import { usersAPI } from '../../utils/api'
 import RoleSelect from './RoleSelect'
+import ClassFields from './ClassFields'
 
 const BLANK_FORM = {
   last_name: '', first_name: '', username: '', role: ROLES.TEACHER,
-  assigned_grade: 'Grade 6', assigned_section: 'Sampaguita', password: '',
+  assigned_grade: 'Grade 6', assigned_section: '', password: '',
 }
 const MIN_PASSWORD = 8
 
@@ -14,6 +15,7 @@ function validate(form) {
   if (!form.last_name.trim())  return 'Last name is required.'
   if (!form.first_name.trim()) return 'First name is required.'
   if (!form.username.trim())   return 'Username is required.'
+  if (form.role === ROLES.TEACHER && !form.assigned_section.trim()) return 'A teacher needs an assigned section.'
   if (!form.password)          return 'Password is required.'
   if (form.password.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters.`
   return null
@@ -30,7 +32,7 @@ function toPayload(form) {
     role:             form.role,
     employee_id:      username,
     assigned_grade:   isTeacher ? form.assigned_grade : null,
-    assigned_section: isTeacher ? form.assigned_section : null,
+    assigned_section: isTeacher ? form.assigned_section.trim() : null,
   }
 }
 
@@ -83,18 +85,9 @@ export default function AddUserForm({ onCreated }) {
       </FormGroup>
 
       {form.role === ROLES.TEACHER && (
-        <div className="form-row-2">
-          <FormGroup label="Assigned grade">
-            <select className="fld" value={form.assigned_grade} onChange={e => set('assigned_grade', e.target.value)}>
-              {GRADE_LEVELS.map(g => <option key={g}>{g}</option>)}
-            </select>
-          </FormGroup>
-          <FormGroup label="Assigned section">
-            <select className="fld" value={form.assigned_section} onChange={e => set('assigned_section', e.target.value)}>
-              {SECTIONS.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </FormGroup>
-        </div>
+        <ClassFields
+          grade={form.assigned_grade} section={form.assigned_section}
+          onGrade={v => set('assigned_grade', v)} onSection={v => set('assigned_section', v)}/>
       )}
 
       <FormGroup label={`Temporary password * (min. ${MIN_PASSWORD} characters)`}>

@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useApp } from '../context/AppContext'
-import { ROLE_LABELS, isStaffRole } from '../data/constants'
+import { ROLE_LABELS, ROLES, isStaffRole } from '../data/constants'
 import { Card, Badge, Btn, StatusBanner, EmptyState, PageHeader, SearchInput } from '../components/ui/index'
 import { usersAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
@@ -13,15 +13,16 @@ import PermissionMatrix from './users/PermissionMatrix'
 function toRow(u) {
   const staff = isStaffRole(u.role)
   return {
+    user:       u,
     id:         u.id,
-    name:       u.full_name || u.username,
+    name:      u.full_name || u.username,
     username:   u.username,
     roleCode:   u.role,
     roleLabel:  ROLE_LABELS[u.role] || 'Teacher',
     roleBadge:  staff ? 'b-blue' : 'b-grey',
     access:     u.assigned_grade && u.assigned_section
                   ? `${u.assigned_grade} — ${u.assigned_section}`
-                  : staff ? 'Full system access' : '—',
+                  : staff ? 'Full system access' : 'No class assigned — sees no records',
     lastLogin:  u.last_login ? formatDate(u.last_login) : 'Never',
     isActive:   u.is_active !== false,
   }
@@ -34,6 +35,7 @@ export default function UsersPage() {
   const { user: currentUser } = useApp()
   const [editing, setEditing] = useState(null)
   const [search,  setSearch]  = useState('')
+  const canManage = currentUser?.role === ROLES.OIC  // Admin Staff can view the list only
 
   const fetchUsers = useCallback(() => usersAPI.list(), [])
   const { data, loading, error, refetch } = useFetch(fetchUsers)
@@ -47,7 +49,7 @@ export default function UsersPage() {
       if (row.id) await usersAPI.update(row.id, { is_active: false })
       refetch()
     } catch (e) {
-      alert(e?.offline ? "Can't reach the server. Try again in a moment." : 'Deactivation failed.')
+      alert(e?.offline ? "Can't reach the server. Try again in a moment." : e?.data?.detail || 'Deactivation failed.')
     }
   }
 
@@ -72,7 +74,7 @@ export default function UsersPage() {
 
       <div className="g2" style={{ marginBottom: 16 }}>
         <PermissionMatrix/>
-        <AddUserForm onCreated={refetch}/>
+        {canManage && <AddUserForm onCreated={refetch}/>}
       </div>
 
       <Card
@@ -91,7 +93,7 @@ export default function UsersPage() {
         ) : (
           <table>
             <thead>
-              <tr><th>Name</th><th>Username</th><th>Role</th><th>Class access</th><th>Last login</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Name</th><th>Username</th><th>Role</th><th>Class access</th><th>Last login</th><th>Status</th>{canManage && <th>Actions</th>}</tr>
             </thead>
             <tbody>
               {filtered.map(row => (
@@ -102,13 +104,15 @@ export default function UsersPage() {
                   <td style={{ fontSize: 11 }}>{row.access}</td>
                   <td style={{ fontSize: 11 }}>{row.lastLogin}</td>
                   <td><Badge type={row.isActive ? 'b-green' : 'b-grey'}>{row.isActive ? 'Active' : 'Inactive'}</Badge></td>
-                  <td>
-                    <div className="btn-row">
-                      <Btn size="sm" onClick={() => setEditing(row)}>Edit</Btn>
-                      {row.isActive && <Btn variant="danger" size="sm" onClick={() => handleDeactivate(row)}>Deactivate</Btn>}
-                      {row.id !== currentUser?.id && <Btn variant="danger" size="sm" onClick={() => handleDelete(row)}>Delete</Btn>}
-                    </div>
-                  </td>
+                  {canManage && (
+                    <td>
+                      <div className="btn-row">
+                        <Btn size="sm" onClick={() => setEditing(row.user)}>Edit</Btn>
+                        {row.isActive && <Btn variant="danger" size="sm" onClick={() => handleDeactivate(row)}>Deactivate</Btn>}
+                        {row.id !== currentUser?.id && <Btn variant="danger" size="sm" onClick={() => handleDelete(row)}>Delete</Btn>}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))}
               {filtered.length === 0 && (

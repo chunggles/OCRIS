@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, useCallback } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { authAPI } from '../utils/api'
 
 const AppContext = createContext(null)
 
@@ -7,6 +8,8 @@ export function AppProvider({ children }) {
   const [user,       setUser]       = useState(null)
   const [activePage, setActivePage] = useState('dashboard')
   const [navParams,  setNavParams]  = useState({})
+  // True while a stored session from before a page refresh is being checked with the server
+  const [restoring,  setRestoring]  = useState(authAPI.hasSession)
 
   const login = useCallback((u) => { setUser(u); setLoggedIn(true) }, [])
 
@@ -19,7 +22,13 @@ export function AppProvider({ children }) {
     setNavParams(params); setActivePage(page)
   }, [])
 
-  const value = { loggedIn, user, login, logout, activePage, nav, navParams }
+  // Stay signed in across a refresh. An expired session gets a 401, which api.js sends to the login screen.
+  useEffect(() => {
+    if (!authAPI.hasSession()) return
+    authAPI.me().then(login).catch(() => {}).finally(() => setRestoring(false))
+  }, [login])
+
+  const value = { loggedIn, restoring, user, login, logout, activePage, nav, navParams }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
 

@@ -57,13 +57,18 @@ export const authAPI = {
     token.clear()
   },
   me: () => request('/auth/me/'),
+  // True when a token from an earlier sign-in is still stored (it may have expired)
+  hasSession: () => Boolean(token.get()),
+  changePassword: (current_password, new_password) =>
+    request('/auth/change-password/', withBody('POST', { current_password, new_password })),
 }
 
 export const recordsAPI = {
-  list:   (params = {})    => request(`/records/?${qs(params)}`),
+  list:    (params = {})   => request(`/records/?${qs(params)}`),
+  options: ()              => request('/records/options/'),
   get:    (id)             => request(`/records/${id}/`),
   search: (q, params = {}) => request(`/records/search/?${qs({ q, ...params })}`),
-  update: (id, data)       => request(`/records/${id}/update/`, withBody('PUT', data)),
+  update: (id, data)       => request(`/records/${id}/update/`, withBody('PATCH', data)),
   delete: (id)             => request(`/records/${id}/delete/`, { method: 'DELETE' }),
 }
 

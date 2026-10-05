@@ -8,7 +8,7 @@ from ..constants import PUPIL_KEYS
 from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, run_ocr
 from ..serializers import ValidationSubmitSerializer
 from ..services import grading, storage
-from ..utils.http import detail, not_found, page_param
+from ..utils.http import detail, no_class_assigned, not_found, page_param
 
 
 @api_view(['POST'])
@@ -67,9 +67,15 @@ def ocr_validate(request):
     data = s.validated_data
     scan_id = data['scan_id']
 
-    corrections = {c['field']: c['corrected_val'] for c in data.get('corrections', [])}
     scan = db.get_scan(scan_id)
-    grades = grading.build_grades(scan.get('ocr_fields', []) if scan else [], corrections)
+    if not scan:
+        return not_found('Scan not found. Upload the form again.')
+    if scan.get('outcome') == 'saved':
+        # Saving the same scan twice would create a duplicate record
+        return detail(f"This scan was already saved as record {scan.get('record_id')}.", 409)
+
+    corrections = {c['field']: c['corrected_val'] for c in data.get('corrections', [])}
+    grades = grading.build_grades(scan.get('ocr_fields', []), corrections)
     general_average = grading.compute_general_average(grades)
     remarks = grading.remarks_for(general_average, grades)
 
@@ -104,8 +110,7 @@ def scan_file(request, scan_id):
     if not scan or not scan.get('filename'):
         return not_found('Scan not found.')
 
-    scope = request.user.class_scope()
-    if any(scan.get(key) != value for key, value in scope.items()):
+    if not request.user.can_access(scan):
         return detail('You can only download forms for your assigned class.', 403)
 
     path = storage.find_scan_file(scan['filename'])
@@ -124,4 +129,6 @@ def scan_file(request, scan_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def scan_history(request):
-    return Response(db.list_scans(page=page_param(request)))
+    if request.user.missing_class:
+        return no_class_assigned()
+    return Response(db.list_scans(request.user.class_scope(), page=page_param(request)))

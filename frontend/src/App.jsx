@@ -1,6 +1,8 @@
 import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './components/layout/Sidebar'
 import Topbar  from './components/layout/Topbar'
+import { StatusBanner } from './components/ui/index'
+import { canOpenPage } from './data/constants'
 import LoginPage        from './pages/LoginPage'
 import DashboardPage    from './pages/DashboardPage'
 import UploadPage       from './pages/UploadPage'
@@ -26,9 +28,11 @@ const PAGES = {
 }
 
 function AppShell() {
-  const { loggedIn, activePage } = useApp()
+  const { loggedIn, restoring, user, activePage } = useApp()
+  if (restoring) return <StatusBanner loading/>
   if (!loggedIn) return <LoginPage/>
-  const Page = PAGES[activePage] || DashboardPage
+  // Pages a role may not open fall back to the dashboard; the server enforces the same rule
+  const Page = (canOpenPage(activePage, user?.role) && PAGES[activePage]) || DashboardPage
   return (
     <div className="app-shell">
       <Sidebar/>
