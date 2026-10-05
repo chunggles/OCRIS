@@ -1,4 +1,4 @@
-"""MongoDB access for records, scans, the audit log, and the users mirror."""
+"""MongoDB access for records, scans, the audit log, the section tree, and the users mirror."""
 import logging
 import re
 import uuid
@@ -7,7 +7,7 @@ from datetime import datetime
 from django.conf import settings
 from pymongo import DESCENDING, MongoClient
 
-from .constants import PASSING_GRADE, is_na
+from .constants import GRADE_LEVELS, PASSING_GRADE, is_na
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,8 @@ def users_col():
     return get_db()['users']
 
 
-def sections_col():
-    return get_db()['sections']
+def grade_levels_col():
+    return get_db()['grade_levels']
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -269,48 +269,74 @@ def sync_users_to_mongo(users):
 
 # ── Sections ─────────────────────────────────────────────────────────────────
 
-def list_sections():
-    """Every section, ordered by grade level and then by name."""
-    sections = _serialize(list(sections_col().find({}, {'_id': 0})))
-    return sorted(sections, key=lambda s: (s['grade_level'], s['name'].lower()))
+# Sections are a tree: one document per grade level (the parent node), holding its
+# sections (the child nodes) in a "sections" array.
+
+def _sections_of(grade_level):
+    node = grade_levels_col().find_one({'grade_level': grade_level}, {'_id': 0}) or {}
+    return node.get('sections', [])
+
+
+def _locate_section(section_id):
+    """(grade level, section) of the child node with this id, or (None, None)."""
+    node = grade_levels_col().find_one(
+        {'sections.section_id': section_id}, {'_id': 0, 'grade_level': 1, 'sections.$': 1})
+    return (node['grade_level'], node['sections'][0]) if node else (None, None)
+
+
+def _attach_section(grade_level, section):
+    grade_levels_col().update_one({'grade_level': grade_level}, {'$push': {'sections': section}}, upsert=True)
+
+
+def _detach_section(section_id):
+    result = grade_levels_col().update_one(
+        {'sections.section_id': section_id}, {'$pull': {'sections': {'section_id': section_id}}})
+    return result.modified_count > 0
+
+
+def section_tree():
+    """Every grade level in order, each with its sections sorted by name. Empty grade levels are included."""
+    children = {node['grade_level']: node.get('sections', []) for node in grade_levels_col().find({}, {'_id': 0})}
+    return [
+        {'grade_level': grade, 'sections': sorted(_serialize(children.get(grade, [])), key=lambda s: s['name'].lower())}
+        for grade in GRADE_LEVELS
+    ]
 
 
 def get_section(section_id):
-    section = sections_col().find_one({'section_id': section_id}, {'_id': 0})
-    return _serialize([section])[0] if section else None
+    """A section together with the grade level it sits under."""
+    grade_level, section = _locate_section(section_id)
+    return _serialize([{**section, 'grade_level': grade_level}])[0] if section else None
 
 
 def find_section(name, grade_level, exclude_id=None):
-    """The section with this name in this grade level, ignoring case, if there is one."""
-    query = {'name': _exact_ignoring_case(name), 'grade_level': grade_level}
-    if exclude_id:
-        query['section_id'] = {'$ne': exclude_id}
-    return sections_col().find_one(query, {'_id': 0})
+    """The section with this name under this grade level, ignoring case, if there is one."""
+    for section in _sections_of(grade_level):
+        if section['name'].casefold() == name.casefold() and section['section_id'] != exclude_id:
+            return section
+    return None
 
 
 def create_section(name, grade_level):
     section_id = f'SEC-{_short_id()}'
     now = datetime.utcnow()
-    sections_col().insert_one({
-        'section_id':  section_id,
-        'name':        name,
-        'grade_level': grade_level,
-        'created_at':  now,
-        'updated_at':  now,
-    })
+    _attach_section(grade_level, {'section_id': section_id, 'name': name, 'created_at': now, 'updated_at': now})
     return section_id
 
 
 def update_section(section_id, name, grade_level):
-    sections_col().update_one({'section_id': section_id}, {'$set': {
-        'name': name,
-        'grade_level': grade_level,
-        'updated_at': datetime.utcnow(),
-    }})
+    """Rename a section, moving it under another grade level if that changed."""
+    current_grade, section = _locate_section(section_id)
+    section = {**section, 'name': name, 'updated_at': datetime.utcnow()}
+    if grade_level == current_grade:
+        grade_levels_col().update_one({'sections.section_id': section_id}, {'$set': {'sections.$': section}})
+    else:
+        _detach_section(section_id)
+        _attach_section(grade_level, section)
 
 
 def delete_section(section_id):
-    return sections_col().delete_one({'section_id': section_id}).deleted_count > 0
+    return _detach_section(section_id)
 
 
 # ── Analytics ────────────────────────────────────────────────────────────────

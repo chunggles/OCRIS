@@ -1,4 +1,4 @@
-"""Create the default OCRIS accounts. Run with: python seed.py"""
+"""Create the default OCRIS accounts and sections. Run with: python seed.py"""
 import os
 
 import django
@@ -6,7 +6,8 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ocris_backend.settings')
 django.setup()
 
-from api.models import OCRISUser  # noqa: E402  (needs django.setup() first)
+from api import db  # noqa: E402  (needs django.setup() first)
+from api.models import OCRISUser  # noqa: E402
 
 # Set SEED_PASSWORD in backend/.env (loaded by settings.py).
 DEFAULT_PASSWORD = os.environ.get('SEED_PASSWORD')
@@ -21,9 +22,23 @@ USERS = [
 ]
 
 
+def seed_sections():
+    """Add the classes of the teachers above to the section tree, so they can pick them when uploading."""
+    print('Seeding sections...')
+    for _, _, _, _, grade, section, _ in USERS:
+        if not (grade and section):
+            continue
+        if db.find_section(section, grade):
+            print(f'  Already exists: {grade} — {section}')
+        else:
+            db.create_section(section, grade)
+            print(f'  Created: {grade} — {section}')
+
+
 def main():
     if not DEFAULT_PASSWORD:
         raise SystemExit('SEED_PASSWORD is not set. Add it to backend/.env.')
+    seed_sections()
     print('Seeding OCRIS users...')
     for username, first, last, role, grade, section, employee_id in USERS:
         if OCRISUser.objects.filter(username=username).exists():

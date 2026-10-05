@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 from api import db
 from api.services import storage
 
-COLLECTIONS = ('records', 'scans', 'audit_log', 'users')
+COLLECTIONS = ('records', 'scans', 'audit_log', 'users', 'grade_levels')
 
 
 class Command(BaseCommand):

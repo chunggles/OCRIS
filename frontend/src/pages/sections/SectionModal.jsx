@@ -3,8 +3,9 @@ import { GRADE_LEVELS } from '../../data/constants'
 import { Btn, FormGroup, Notice } from '../../components/ui/index'
 import { sectionsAPI } from '../../utils/api'
 
-// Adds a section, or edits `section` when one is given. `defaultGrade` preselects the grade for a new one.
-export default function SectionModal({ section, defaultGrade = GRADE_LEVELS[0], onClose, onSaved }) {
+// Adds a section under a grade level, or edits `section` when one is given. `gradeLevels` are the
+// parent nodes it can sit under; `defaultGrade` preselects the one for a new section.
+export default function SectionModal({ section, gradeLevels = GRADE_LEVELS, defaultGrade = gradeLevels[0], onClose, onSaved }) {
   const editing = Boolean(section)
   const [name,    setName]    = useState(section?.name || '')
   const [grade,   setGrade]   = useState(section?.grade_level || defaultGrade)
@@ -38,7 +39,7 @@ export default function SectionModal({ section, defaultGrade = GRADE_LEVELS[0], 
         </FormGroup>
         <FormGroup label="Grade Level:">
           <select className="fld" value={grade} onChange={e => setGrade(e.target.value)}>
-            {GRADE_LEVELS.map(g => <option key={g}>{g}</option>)}
+            {gradeLevels.map(g => <option key={g}>{g}</option>)}
           </select>
         </FormGroup>
 

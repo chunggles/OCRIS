@@ -29,7 +29,8 @@ def _section_fields(data, current=None):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def sections_list(request):
-    return Response(db.list_sections())
+    """The section tree: each grade level with the sections under it."""
+    return Response(db.section_tree())
 
 
 @api_view(['POST'])

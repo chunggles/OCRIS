@@ -304,13 +304,19 @@ class SectionTests(ApiTestCase):
         body = {'name': name, 'grade_level': grade}
         return self.as_user(user or self.oic).post('/api/sections/create/', body, format='json')
 
+    def tree(self, user=None):
+        """The section tree as {grade level: [section names]}."""
+        nodes = self.as_user(user or self.oic).get('/api/sections/').data
+        return {node['grade_level']: [s['name'] for s in node['sections']] for node in nodes}
+
     def test_add_and_list_sections(self):
         self.assertEqual(self.add('Rosal', 'Grade 2').status_code, 201)
         self.assertEqual(self.add('  Sampaguita ', user=self.admin).data['name'], 'Sampaguita')
         self.add('Orchid')
-        sections = self.as_user(self.teacher).get('/api/sections/').data
-        self.assertEqual([(s['grade_level'], s['name']) for s in sections],
-                         [('Grade 1', 'Orchid'), ('Grade 1', 'Sampaguita'), ('Grade 2', 'Rosal')])
+        self.assertEqual(self.tree(self.teacher), {
+            'Grade 1': ['Orchid', 'Sampaguita'], 'Grade 2': ['Rosal'],
+            'Grade 3': [], 'Grade 4': [], 'Grade 5': [], 'Grade 6': [],
+        })
 
     def test_add_rejects_bad_input(self):
         self.add('Rosal')
@@ -319,7 +325,7 @@ class SectionTests(ApiTestCase):
         self.assertEqual(self.add('ROSAL').status_code, 400)  # same name in the same grade
         self.assertEqual(self.add('Rosal', 'Grade 2').status_code, 201)  # other grades may reuse a name
         self.assertEqual(self.add('Jasmine', user=self.teacher).status_code, 403)
-        self.assertEqual(db.sections_col().count_documents({}), 2)
+        self.assertEqual((self.tree()['Grade 1'], self.tree()['Grade 2']), (['Rosal'], ['Rosal']))
 
     def test_edit_section(self):
         self.add('Orchid')
@@ -329,6 +335,7 @@ class SectionTests(ApiTestCase):
         self.assertEqual(self.as_user(self.oic).patch(url, {'name': 'rosal'}, format='json').data['name'], 'rosal')
         moved = self.as_user(self.admin).patch(url, {'name': 'Jasmine', 'grade_level': 'Grade 3'}, format='json')
         self.assertEqual((moved.data['name'], moved.data['grade_level']), ('Jasmine', 'Grade 3'))
+        self.assertEqual((self.tree()['Grade 1'], self.tree()['Grade 3']), (['Orchid'], ['Jasmine']))  # moved to the new parent
         self.assertEqual(self.as_user(self.oic).patch('/api/sections/SEC-NOPE/', {'name': 'X'}, format='json').status_code, 404)
 
     def test_delete_section_keeps_records(self):
@@ -337,7 +344,7 @@ class SectionTests(ApiTestCase):
         self.assertEqual(self.as_user(self.teacher).delete(url).status_code, 403)
         self.assertEqual(self.as_user(self.admin).delete(url).status_code, 204)
         self.assertEqual(self.as_user(self.admin).delete(url).status_code, 404)
-        self.assertEqual(self.as_user(self.oic).get('/api/sections/').data, [])
+        self.assertEqual(self.tree()['Grade 1'], [])
         self.assertEqual(db.get_record(record_id)['section'], 'Rosal')
 
 

@@ -42,6 +42,7 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#FAFBFD}
 .btn-secondary{background:var(--bg);color:var(--text-2);border-color:var(--border)}
 .btn-success{background:var(--green);color:#fff}
 .btn-danger{background:var(--rose-l);color:var(--rose);border-color:#DDB8C0}
+.btn-delete{background:var(--rose);color:#fff;border-color:var(--rose)}
 .btn-sm{padding:5px 10px;font-size:11px;border-radius:4px}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .btn-icon{padding:6px;border-radius:4px}
@@ -152,6 +153,8 @@ th.center,td.center,.center{text-align:center}
 .modal{background:var(--surface);border-radius:10px;width:420px;max-width:calc(100vw - 32px);padding:24px;box-shadow:0 8px 32px rgba(0,0,0,.18)}
 .modal-title{font-weight:700;font-size:15px;margin-bottom:4px}
 .modal-sub{font-size:12px;color:var(--text-3);margin-bottom:18px}
+.confirm-text{font-size:13px;color:var(--text-2);margin-bottom:8px}
+.confirm-target{font-size:14px;font-weight:700;color:var(--text);overflow-wrap:anywhere}
 /* Sections page */
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:14px;overflow-x:auto}
 .tab{padding:9px 16px;font-size:12px;font-weight:500;color:var(--text-3);cursor:pointer;border:none;border-bottom:2px solid transparent;margin-bottom:-1px;background:none;font-family:inherit;white-space:nowrap}

@@ -106,12 +106,18 @@ export const usersAPI = {
   delete: (id)       => request(`/users/${id}/`, { method: 'DELETE' }),
 }
 
+// Sections are a tree: tree() returns [{ grade_level, sections: [{ section_id, name }] }]
 export const sectionsAPI = {
-  list:   ()         => request('/sections/'),
+  tree:   ()         => request('/sections/'),
   create: (data)     => request('/sections/create/', withBody('POST', data)),
   update: (id, data) => request(`/sections/${encodeURIComponent(id)}/`, withBody('PATCH', data)),
   delete: (id)       => request(`/sections/${encodeURIComponent(id)}/`, { method: 'DELETE' }),
 }
+
+// Reading the tree: the parent nodes (grade levels), and the child nodes (sections) of one parent
+const nodesOf = (tree) => (Array.isArray(tree) ? tree : [])
+export const gradeLevelsOf = (tree) => nodesOf(tree).map(node => node.grade_level)
+export const sectionsOf = (tree, gradeLevel) => nodesOf(tree).find(node => node.grade_level === gradeLevel)?.sections || []
 
 export const auditAPI = {
   list: (page = 1) => request(`/audit/?${qs({ page })}`),

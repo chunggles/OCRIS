@@ -32,8 +32,6 @@ export const PAGE_TITLES = {
 
 export const OCR_STEPS    = ['Upload', 'Quality', 'Processing', 'Extraction', 'Validation', 'Confirm']
 export const GRADE_LEVELS = ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
-// Suggestions only: sections are typed in, and filters list the sections that records actually use
-export const SECTIONS     = ['Sampaguita', 'Orchid', 'Rosal', 'Ilang-Ilang', 'Jasmine']
 
 // School years from the current one back to 1990, newest first. A school year starts in June.
 const OLDEST_SCHOOL_YEAR = 1990

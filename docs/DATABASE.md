@@ -5,7 +5,7 @@ OCRIS uses two databases and a file folder.
 | Store | Holds | Defined in |
 |---|---|---|
 | SQLite (`backend/db.sqlite3`) | User accounts, login tokens | `backend/api/models.py`, Django migrations |
-| MongoDB (database named by `MONGO_DB_NAME`) | `records`, `scans`, `audit_log`, `users` | `backend/api/db.py` |
+| MongoDB (database named by `MONGO_DB_NAME`) | `records`, `scans`, `audit_log`, `users`, `grade_levels` (the section tree; see [API.md](API.md#sections)) | `backend/api/db.py` |
 | File system (`backend/media/scans/`) | Uploaded scan images | `backend/api/services/storage.py` |
 
 ## Relationships

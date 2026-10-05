@@ -57,7 +57,7 @@ The token is returned by `POST /auth/login/`.
 | GET | `/ocr/scans/<scan_id>/file/` | Any (teachers: own class) | Download the original scan |
 | GET | `/ocr/history/` | Any (teachers: own class) | List scans |
 | GET | `/analytics/` | Any (teachers: own class) | Grade analytics |
-| GET | `/sections/` | Any | List sections |
+| GET | `/sections/` | Any | The section tree (grade levels and their sections) |
 | POST | `/sections/create/` | OIC, Admin | Add a section |
 | PATCH, DELETE | `/sections/<section_id>/` | OIC, Admin | Edit or delete a section |
 | GET | `/users/` | OIC, Admin | List users |
@@ -400,7 +400,25 @@ Writes a `DELETE_USER` audit entry.
 
 ## Sections
 
-The list of sections per grade level, managed on the Sections page. Records and teacher accounts store their section as plain text, so editing or deleting a section here does not change them.
+Sections are a tree, managed on the Sections page: each grade level is a parent node and its sections are the child nodes. It is stored in the `grade_levels` collection, one document per grade level with its sections in a `sections` array. Records and teacher accounts store their section as plain text, so editing or deleting a section here does not change them.
+
+### GET `/sections/`
+
+Access: any. Returns the whole tree: all six grade levels in order, including those with no sections, each with its sections ordered by name.
+
+```json
+[
+  {
+    "grade_level": "Grade 1",
+    "sections": [
+      { "section_id": "SEC-3F9A1C2B", "name": "Sampaguita", "created_at": "2026-10-05T02:10:00Z", "updated_at": "2026-10-05T02:10:00Z" }
+    ]
+  },
+  { "grade_level": "Grade 2", "sections": [] }
+]
+```
+
+The add and edit endpoints below return a single section, with the grade level it sits under:
 
 ```json
 {
@@ -411,10 +429,6 @@ The list of sections per grade level, managed on the Sections page. Records and 
   "updated_at": "2026-10-05T02:10:00Z"
 }
 ```
-
-### GET `/sections/`
-
-Access: any. Returns an array of all sections (not paginated), ordered by grade level then name.
 
 ### POST `/sections/create/`
 
@@ -428,7 +442,7 @@ Access: OIC, Admin.
 
 ### PATCH `/sections/<section_id>/`
 
-Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Returns the updated section object. Writes an `EDIT_SECTION` audit entry.
+Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Changing `grade_level` moves the section under that grade level. Returns the updated section object. Writes an `EDIT_SECTION` audit entry.
 
 ### DELETE `/sections/<section_id>/`
 

@@ -1,6 +1,8 @@
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { GRADE_LEVELS, SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
+import { sectionsAPI, gradeLevelsOf, sectionsOf } from '../../utils/api'
+import { useFetch } from '../../utils/useFetch'
 import { useObjectUrl } from '../../utils/useObjectUrl'
 import { formatMB } from '../../utils/format'
 
@@ -22,7 +24,7 @@ const SCAN_GUIDELINES = [
 
 function validate(form, file) {
   if (!form.last_name || !form.first_name) return "Please enter the pupil's name."
-  if (!form.section.trim()) return 'Please enter a section.'
+  if (!form.section) return 'Please choose a section.'
   if (!file) return 'Please choose a scanned Form 137 file.'
   return null
 }
@@ -59,7 +61,23 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
   const [error, setError] = useState('')
   const preview = useObjectUrl(file)
 
+  const fetchSections = useCallback(() => sectionsAPI.tree(), [])
+  const { data: sectionTree, loading: sectionsLoading, error: sectionsError } = useFetch(fetchSections)
+
   const set = (key, value) => setForm(f => ({ ...f, [key]: value }))
+
+  // Both dropdowns follow the section tree: the grade levels are its parent nodes, and the section
+  // options are the children of the chosen grade level. A section that isn't one of them counts as not chosen.
+  const gradeLevels  = sectionTree?.length ? gradeLevelsOf(sectionTree) : GRADE_LEVELS
+  const sectionNames = sectionsOf(sectionTree, form.grade).map(s => s.name)
+  const section = sectionNames.includes(form.section) ? form.section : ''
+  const sectionPlaceholder = sectionsLoading ? 'Loading...'
+    : sectionsError ? 'Could not load sections'
+    : sectionNames.length === 0 ? `No sections in ${form.grade}`
+    : 'Select a section'
+
+  // Sections belong to a grade level, so changing the grade clears the chosen section
+  const handleGrade = (grade) => setForm(f => ({ ...f, grade, section: '' }))
 
   const handleFile = (f) => {
     if (!f) return
@@ -69,10 +87,10 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
   }
 
   const handleNext = () => {
-    const problem = validate(form, file)
+    const problem = validate({ ...form, section }, file)
     if (problem) { setError(problem); return }
     setError('')
-    onNext({ file, form: { ...form, section: form.section.trim() } })
+    onNext({ file, form: { ...form, section } })
   }
 
   return (
@@ -89,12 +107,15 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
           </div>
           <div className="form-row-3">
             <FormGroup label="Grade level">
-              <select className="fld" value={form.grade} onChange={e => set('grade', e.target.value)}>
-                {GRADE_LEVELS.map(g => <option key={g}>{g}</option>)}
+              <select className="fld" value={form.grade} onChange={e => handleGrade(e.target.value)}>
+                {gradeLevels.map(g => <option key={g}>{g}</option>)}
               </select>
             </FormGroup>
             <FormGroup label="Section *">
-              <input className="fld" value={form.section} onChange={e => set('section', e.target.value)} placeholder="e.g. Sampaguita"/>
+              <select className="fld" value={section} onChange={e => set('section', e.target.value)} disabled={sectionNames.length === 0}>
+                <option value="">{sectionPlaceholder}</option>
+                {sectionNames.map(s => <option key={s}>{s}</option>)}
+              </select>
             </FormGroup>
             <FormGroup label="School year">
               <select className="fld" value={form.school_year} onChange={e => set('school_year', e.target.value)}>
