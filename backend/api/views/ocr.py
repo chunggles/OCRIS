@@ -21,12 +21,28 @@ def ocr_quality(request):
     return Response(get_image_quality(file))
 
 
+def _outside_own_class(user, pupil):
+    """
+    The refusal for a teacher filing a form under a class that isn't theirs, else None.
+    Teachers only see their own class, so a form filed elsewhere would vanish from their lists.
+    """
+    if user.missing_class:
+        return no_class_assigned()
+    if not user.can_access(pupil):
+        return detail('You can only upload forms for your assigned class.', 403)
+    return None
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ocr_upload(request):
     file = request.FILES.get('file')
     if not file:
         return detail('No file provided.', 400)
+    pupil = {key: request.data.get(key, '') for key in PUPIL_KEYS}
+    refusal = _outside_own_class(request.user, pupil)
+    if refusal:
+        return refusal
 
     stored_name, path = storage.save_upload(file)
     try:
@@ -36,7 +52,6 @@ def ocr_upload(request):
         return detail(str(e), 422)
     quality = get_image_quality(str(path))
     summary = compute_confidence_summary(fields)
-    pupil = {key: request.data.get(key, '') for key in PUPIL_KEYS}
 
     scan_id = db.create_scan({
         **pupil,
@@ -66,6 +81,9 @@ def ocr_validate(request):
         return Response(s.errors, status=400)
     data = s.validated_data
     scan_id = data['scan_id']
+    refusal = _outside_own_class(request.user, data)
+    if refusal:
+        return refusal
 
     scan = db.get_scan(scan_id)
     if not scan:

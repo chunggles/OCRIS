@@ -1,15 +1,18 @@
 import { useCallback, useRef, useState } from 'react'
-import { GRADE_LEVELS, SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
+import { useApp } from '../../context/AppContext'
+import { GRADE_LEVELS, ROLES, SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
 import { sectionsAPI, gradeLevelsOf, sectionsOf } from '../../utils/api'
 import { useFetch } from '../../utils/useFetch'
 import { useObjectUrl } from '../../utils/useObjectUrl'
-import { formatMB } from '../../utils/format'
+import { formatMB, plural } from '../../utils/format'
 
-const DEFAULT_FORM = { last_name: '', first_name: '', grade: 'Grade 5', section: '', school_year: CURRENT_SCHOOL_YEAR, lrn: '' }
+const DEFAULT_CLASS = { grade: 'Grade 5', section: '', school_year: CURRENT_SCHOOL_YEAR }
 // PDFs can't be read by the OCR engine, so only images are accepted
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
 const MAX_BYTES = 20 * 1024 * 1024
+const MAX_FORMS = 30
+const NO_CLASS = 'Your account has no class assigned yet. Ask the OIC to assign your grade and section.'
 
 const SCAN_GUIDELINES = [
   ['green', 'Yes',  'Scan at 300 DPI minimum for accurate OCR'],
@@ -22,120 +25,177 @@ const SCAN_GUIDELINES = [
   ['rose',  'No',   'Torn or severely water-damaged documents'],
 ]
 
-function validate(form, file) {
-  if (!form.last_name || !form.first_name) return "Please enter the pupil's name."
-  if (!form.section) return 'Please choose a section.'
-  if (!file) return 'Please choose a scanned Form 137 file.'
+// One row per chosen file: the scan plus the pupil it belongs to
+let lastRowId = 0
+const newRow = (file, pupil = {}) => ({ id: ++lastRowId, file, last_name: '', first_name: '', lrn: '', ...pupil })
+
+const fileProblem = (file) => {
+  if (!ACCEPTED_TYPES.includes(file.type)) return 'only JPG or PNG images are accepted (export a PDF as an image first)'
+  if (file.size > MAX_BYTES) return 'the file must be under 20 MB'
   return null
 }
 
-function DropZone({ file, onFile }) {
+function validate(rows, section, isTeacher) {
+  if (!section) return isTeacher ? NO_CLASS : 'Please choose a section.'
+  if (rows.length === 0) return 'Please choose at least one scanned Form 137 file.'
+  const unnamed = rows.filter(r => !r.last_name.trim() || !r.first_name.trim())
+  if (unnamed.length) return `Please enter the pupil's name for: ${unnamed.map(r => r.file.name).join(', ')}.`
+  return null
+}
+
+function DropZone({ onFiles }) {
   const inputRef = useRef(null)
   return (
-    <div className={`dropzone${file ? ' has-file' : ''}`}
+    <div className="dropzone"
       onClick={() => inputRef.current?.click()}
       onDragOver={e => e.preventDefault()}
-      onDrop={e => { e.preventDefault(); onFile(e.dataTransfer.files[0]) }}>
-      <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png" hidden onChange={e => onFile(e.target.files[0])}/>
-      {file ? (
-        <>
-          <div className="dropzone-icon">📄</div>
-          <div className="dropzone-title" style={{ color: 'var(--green)' }}>{file.name}</div>
-          <div className="dropzone-sub">{formatMB(file.size)} — click to change</div>
-        </>
-      ) : (
-        <>
-          <div className="dropzone-icon">📁</div>
-          <div className="dropzone-title" style={{ color: 'var(--blue)' }}>Click to browse or drag and drop</div>
-          <div className="dropzone-sub">JPG or PNG — 300 DPI recommended — Max 20 MB</div>
-        </>
-      )}
+      onDrop={e => { e.preventDefault(); onFiles(e.dataTransfer.files) }}>
+      {/* The value is cleared after each pick so the same file can be chosen again */}
+      <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png" multiple hidden
+        onChange={e => { onFiles(e.target.files); e.target.value = '' }}/>
+      <div className="dropzone-icon">📁</div>
+      <div className="dropzone-title" style={{ color: 'var(--blue)' }}>Click to browse or drag and drop</div>
+      <div className="dropzone-sub">You can choose several forms at once — JPG or PNG — 300 DPI recommended — Max 20 MB each</div>
     </div>
   )
 }
 
-// `initial` restores what was entered when the user comes back to this step
+function FormRow({ row, number, onChange, onRemove }) {
+  const preview = useObjectUrl(row.file)
+  return (
+    <div className="queue-item">
+      {preview ? <img src={preview} alt="" className="queue-thumb"/> : <div className="queue-thumb"/>}
+      <div className="queue-body">
+        <div className="queue-file">
+          <span><strong>{number}. {row.file.name}</strong> — {formatMB(row.file.size)}</span>
+          <Btn size="sm" onClick={onRemove}>Remove</Btn>
+        </div>
+        <div className="form-row-3">
+          <input className="fld" value={row.last_name} onChange={e => onChange('last_name', e.target.value)} placeholder="Last name *" aria-label={`Last name for ${row.file.name}`}/>
+          <input className="fld" value={row.first_name} onChange={e => onChange('first_name', e.target.value)} placeholder="First name *" aria-label={`First name for ${row.file.name}`}/>
+          <input className="fld" value={row.lrn} onChange={e => onChange('lrn', e.target.value)} placeholder="LRN (optional)" aria-label={`LRN for ${row.file.name}`}/>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Step 1: pick the class once, then one or more scanned forms, each with its pupil's name.
+// `initial.queue` restores what was entered when the user comes back to this step.
 export default function StepPupilInfo({ initial = {}, onNext }) {
-  const [form,  setForm]  = useState(initial.form || DEFAULT_FORM)
-  const [file,  setFile]  = useState(initial.file || null)
+  const { user } = useApp()
+  const restored = initial.queue || []
+  const [cls,   setCls]   = useState(() => {
+    const form = restored[0]?.form
+    return form ? { grade: form.grade, section: form.section, school_year: form.school_year } : DEFAULT_CLASS
+  })
+  const [rows,  setRows]  = useState(() => restored.map(({ file, form }) =>
+    newRow(file, { last_name: form.last_name, first_name: form.first_name, lrn: form.lrn })))
   const [error, setError] = useState('')
-  const preview = useObjectUrl(file)
 
   const fetchSections = useCallback(() => sectionsAPI.tree(), [])
   const { data: sectionTree, loading: sectionsLoading, error: sectionsError } = useFetch(fetchSections)
 
-  const set = (key, value) => setForm(f => ({ ...f, [key]: value }))
+  // A teacher only sees their own class, so their forms are always filed under it
+  const isTeacher = user?.role === ROLES.TEACHER
+  const ownClass  = isTeacher ? { grade: user.assigned_grade || '', section: user.assigned_section || '' } : null
 
   // Both dropdowns follow the section tree: the grade levels are its parent nodes, and the section
   // options are the children of the chosen grade level. A section that isn't one of them counts as not chosen.
   const gradeLevels  = sectionTree?.length ? gradeLevelsOf(sectionTree) : GRADE_LEVELS
-  const sectionNames = sectionsOf(sectionTree, form.grade).map(s => s.name)
-  const section = sectionNames.includes(form.section) ? form.section : ''
+  const grade        = ownClass ? ownClass.grade : cls.grade
+  const sectionNames = sectionsOf(sectionTree, grade).map(s => s.name)
+  const section      = ownClass ? ownClass.section : sectionNames.includes(cls.section) ? cls.section : ''
   const sectionPlaceholder = sectionsLoading ? 'Loading...'
     : sectionsError ? 'Could not load sections'
-    : sectionNames.length === 0 ? `No sections in ${form.grade}`
+    : sectionNames.length === 0 ? `No sections in ${grade}`
     : 'Select a section'
 
+  const setClass = (key, value) => setCls(c => ({ ...c, [key]: value }))
   // Sections belong to a grade level, so changing the grade clears the chosen section
-  const handleGrade = (grade) => setForm(f => ({ ...f, grade, section: '' }))
+  const handleGrade = (value) => setCls(c => ({ ...c, grade: value, section: '' }))
 
-  const handleFile = (f) => {
-    if (!f) return
-    if (!ACCEPTED_TYPES.includes(f.type)) { setError('Only JPG or PNG images are accepted. If your scan is a PDF, export it as an image first.'); return }
-    if (f.size > MAX_BYTES) { setError('File must be under 20 MB.'); return }
-    setError(''); setFile(f)
+  const setRow    = (id, key, value) => setRows(list => list.map(r => (r.id === id ? { ...r, [key]: value } : r)))
+  const removeRow = (id) => setRows(list => list.filter(r => r.id !== id))
+
+  const handleFiles = (fileList) => {
+    const accepted = [], problems = []
+    for (const file of Array.from(fileList || [])) {
+      const problem = fileProblem(file)
+      if (problem) problems.push(`${file.name}: ${problem}.`)
+      else accepted.push(file)
+    }
+    const room = MAX_FORMS - rows.length
+    if (accepted.length > room) problems.push(`Only ${MAX_FORMS} forms can be uploaded at a time.`)
+    setRows(list => [...list, ...accepted.slice(0, Math.max(room, 0)).map(file => newRow(file))])
+    setError(problems.join(' '))
   }
 
   const handleNext = () => {
-    const problem = validate({ ...form, section }, file)
+    const problem = validate(rows, section, isTeacher)
     if (problem) { setError(problem); return }
     setError('')
-    onNext({ file, form: { ...form, section } })
+    onNext({
+      queue: rows.map(r => ({
+        file: r.file,
+        form: {
+          last_name: r.last_name.trim(), first_name: r.first_name.trim(), lrn: r.lrn.trim(),
+          grade, section, school_year: cls.school_year,
+        },
+      })),
+    })
   }
 
   return (
     <div className="g2">
       <div>
-        <Card title="Pupil information">
-          <div className="form-row-2">
-            <FormGroup label="Last name *">
-              <input className="fld" value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="e.g. Santos"/>
-            </FormGroup>
-            <FormGroup label="First name *">
-              <input className="fld" value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="e.g. Maria Joy L."/>
-            </FormGroup>
-          </div>
+        <Card title="Class">
+          {isTeacher && !section && <Notice>{NO_CLASS}</Notice>}
           <div className="form-row-3">
             <FormGroup label="Grade level">
-              <select className="fld" value={form.grade} onChange={e => handleGrade(e.target.value)}>
-                {gradeLevels.map(g => <option key={g}>{g}</option>)}
-              </select>
+              {ownClass
+                ? <select className="fld" value={grade} disabled><option>{grade}</option></select>
+                : (
+                  <select className="fld" value={grade} onChange={e => handleGrade(e.target.value)}>
+                    {gradeLevels.map(g => <option key={g}>{g}</option>)}
+                  </select>
+                )}
             </FormGroup>
             <FormGroup label="Section *">
-              <select className="fld" value={section} onChange={e => set('section', e.target.value)} disabled={sectionNames.length === 0}>
-                <option value="">{sectionPlaceholder}</option>
-                {sectionNames.map(s => <option key={s}>{s}</option>)}
-              </select>
+              {ownClass
+                ? <select className="fld" value={section} disabled><option>{section}</option></select>
+                : (
+                  <select className="fld" value={section} onChange={e => setClass('section', e.target.value)} disabled={sectionNames.length === 0}>
+                    <option value="">{sectionPlaceholder}</option>
+                    {sectionNames.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                )}
             </FormGroup>
             <FormGroup label="School year">
-              <select className="fld" value={form.school_year} onChange={e => set('school_year', e.target.value)}>
+              <select className="fld" value={cls.school_year} onChange={e => setClass('school_year', e.target.value)}>
                 {SCHOOL_YEARS.map(y => <option key={y}>{y}</option>)}
               </select>
             </FormGroup>
           </div>
-          <FormGroup label="LRN (optional)">
-            <input className="fld" value={form.lrn} onChange={e => set('lrn', e.target.value)} placeholder="12-digit Learner Reference Number"/>
-          </FormGroup>
+          <div className="hint">
+            {isTeacher ? 'Your forms are filed under your assigned class.' : 'Every form you choose below is filed under this class.'}
+          </div>
         </Card>
 
-        <Card title="Upload scanned document">
+        <Card title={rows.length ? `Scanned forms (${rows.length})` : 'Scanned forms'}>
           <Notice>{error}</Notice>
-          <DropZone file={file} onFile={handleFile}/>
-          {preview && <img src={preview} alt="Preview" className="upload-preview"/>}
-          <div className="btn-row">
-            <Btn variant="primary" onClick={handleNext}>Next: Check image quality →</Btn>
-            {file && <Btn onClick={() => setFile(null)}>Clear</Btn>}
+          <DropZone onFiles={handleFiles}/>
+          {rows.map((row, i) => (
+            <FormRow key={row.id} row={row} number={i + 1}
+              onChange={(key, value) => setRow(row.id, key, value)} onRemove={() => removeRow(row.id)}/>
+          ))}
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            <Btn variant="primary" onClick={handleNext}>
+              {rows.length > 1 ? `Next: Check ${plural(rows.length, 'form')} →` : 'Next: Check image quality →'}
+            </Btn>
+            {rows.length > 0 && <Btn onClick={() => setRows([])}>Clear all</Btn>}
           </div>
+          {rows.length > 1 && <div className="hint">The forms are read and checked one after another, in this order.</div>}
         </Card>
       </div>
 

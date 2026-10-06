@@ -52,8 +52,8 @@ The token is returned by `POST /auth/login/`.
 | PUT, PATCH | `/records/<record_id>/update/` | OIC, Admin | Edit a record |
 | DELETE | `/records/<record_id>/delete/` | OIC, Admin | Delete a record |
 | POST | `/ocr/quality/` | Any | Check image quality |
-| POST | `/ocr/upload/` | Any | Upload a scan and run OCR |
-| POST | `/ocr/validate/` | Any | Save a validated record |
+| POST | `/ocr/upload/` | Any (teachers: own class) | Upload a scan and run OCR |
+| POST | `/ocr/validate/` | Any (teachers: own class) | Save a validated record |
 | GET | `/ocr/scans/<scan_id>/file/` | Any (teachers: own class) | Download the original scan |
 | GET | `/ocr/history/` | Any (teachers: own class) | List scans |
 | GET | `/analytics/` | Any (teachers: own class) | Grade analytics |
@@ -201,6 +201,8 @@ Response `400` if no file is sent.
 ### POST `/ocr/upload/`
 
 Saves the image, runs OCR and creates a scan. Body: `multipart/form-data`.
+
+A teacher may only send their assigned `grade_level` and `section` (section case is ignored). Anything else gets `403` here and on `/ocr/validate/`, before the file is stored.
 
 | Field | Required | Meaning |
 |---|---|---|

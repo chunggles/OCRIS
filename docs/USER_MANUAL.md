@@ -106,18 +106,18 @@ Click **Upload Form 137** in the menu. The upload has six steps, shown as tabs a
 | Avoid | Torn or badly water-damaged forms |
 | Not accepted | PDF files. Export the page as an image first. |
 
-Each upload is one image, up to 20 MB.
+Each form is one image, up to 20 MB. You can upload up to 30 forms of the same class at a time.
 
 ### Step 1: Upload
 
-1. Type the pupil's **Last name** and **First name**.
-2. Choose the **Grade level** and **School year**.
-3. Type the **Section**.
-4. Type the **LRN** if you have it (optional).
-5. Click the upload box to choose the scan, or drag the file onto it. A preview appears.
-6. Click **Next: Check image quality**.
+1. Choose the **Grade level**, **Section** and **School year**. The sections listed are the ones the OIC or Admin Staff set up for that grade on the Sections page. Teachers do not choose: their forms are always filed under their assigned class.
+2. Click the upload box and choose the scans, or drag the files onto it. You can choose several at once. Each one appears in a list with a small preview.
+3. For each form in the list, type the pupil's **Last name** and **First name**, and the **LRN** if you have it (optional). Click **Remove** to take a form off the list.
+4. Click **Next**.
 
 Type these details carefully. **The saved record uses what you type here**, not what the system reads from the scan.
+
+With more than one form, steps 2 to 6 run for the first form, then the next, in the order of the list. A bar under the step tabs shows which form you are on, for example "Form 2 of 5". To drop a form partway, go back to step 1 and remove it.
 
 ### Step 2: Quality
 
@@ -194,6 +194,8 @@ To change something, click **Back and edit**.
 ### Record saved
 
 You will see the new **Record ID**, the **General average** and the **Remarks**. From here you can upload another form, view all records, or view analytics.
+
+If you chose several forms, click **Next form** to continue with the next one. **Stop and view records** leaves the remaining forms unsaved.
 
 ### How the remarks are decided
 

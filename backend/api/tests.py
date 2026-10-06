@@ -198,6 +198,22 @@ class RecordTests(ApiTestCase):
         self.assertEqual(second.status_code, 409)
         self.assertEqual(db.records_col().count_documents({}), 1)
 
+    def test_teacher_can_only_file_forms_under_own_class(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        client = self.as_user(self.teacher)
+        other_class = self.validate_payload(self.make_scan(), grade_level='Grade 5', section='Orchid')
+        self.assertEqual(client.post('/api/ocr/validate/', other_class, format='json').status_code, 403)
+        own_class = self.validate_payload(self.make_scan(), section='SAMPAGUITA')  # case is ignored
+        self.assertEqual(client.post('/api/ocr/validate/', own_class, format='json').status_code, 200)
+        self.assertEqual(self.as_user(self.admin).post('/api/ocr/validate/', other_class, format='json').status_code, 200)
+        self.assertEqual(self.as_user(self.unassigned).post('/api/ocr/validate/', other_class, format='json').status_code, 403)
+
+        # An upload for another class is refused before the file is stored or read
+        upload = {'file': SimpleUploadedFile('form.png', b'image', 'image/png'), 'grade_level': 'Grade 5', 'section': 'Orchid'}
+        self.assertEqual(client.post('/api/ocr/upload/', upload, format='multipart').status_code, 403)
+        self.assertEqual(db.scans_col().count_documents({}), 2)
+        self.assertFalse(storage.scans_dir().exists() and any(storage.scans_dir().iterdir()))
+
     def test_validate_rejects_unknown_scan_and_unconfirmed(self):
         client = self.as_user(self.teacher)
         missing = client.post('/api/ocr/validate/', self.validate_payload('SCAN-NOPE'), format='json')
