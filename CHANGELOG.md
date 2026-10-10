@@ -1,5 +1,73 @@
 # OCRIS v3: Changelog
 
+## 2026-10-05 to 2026-10-10
+
+Sections, teacher class rules, multi-form and PDF upload, the on-screen SF10-ES, printing, SF10-ES scanning, and the first round of fixes from the comparison with the capstone paper. The open list of weaknesses is now [docs/WEAKNESSES_2026-10-10.md](docs/WEAKNESSES_2026-10-10.md); the "Open items" further down this file predate it.
+
+### 1. Sections
+
+- New **Sections** page (OIC and Admin Staff): a tab per grade level, with add, edit and delete. Deleting asks for confirmation in a window.
+- Sections are stored as a tree in the new `grade_levels` collection: one document per grade level holding its sections.
+- The Section box on the upload form is a dropdown of the chosen grade's sections. A teacher's assigned section in User Management is picked from the same list.
+- Endpoints: `GET /sections/`, `POST /sections/create/`, `PATCH` and `DELETE /sections/<id>/`. The `backup` command includes the tree.
+
+### 2. Teachers and their class
+
+- **Bug fixed: a teacher's uploads did not show up for them.** A teacher sees only their own class, but could file a form under any class. The upload form now locks a teacher's grade and section, and the server refuses any other class on upload, validation and typed-in records.
+
+### 3. Uploading
+
+- **Several forms at once.** Step 1 takes up to 30 files for one class, each with its own pupil name and LRN. Steps 2 to 6 then run for one form after another.
+- **PDF files.** The first page of a PDF is rendered to an image at 300 DPI (`ocr/pdf.py`, using `pypdfium2`) and read like any scan. Entries typed into a PDF with a PDF tool (form fields, text boxes) are drawn before reading.
+- **Bug fixed: PDFs were refused as "couldn't be opened".** The PDF library is not safe to call from two requests at once; every use is now serialised. Failed uploads are also removed from disk again.
+- **Blank forms are refused**: "Every grade box on this form is empty."
+- React `StrictMode` was removed from `main.jsx`; in development it sent every request twice.
+
+### 4. Fill Out Form 137 (SF10-ES)
+
+- New page that shows the SF10-ES front page (Revised 2025) as a sheet to type on: personal information, eligibility, four scholastic-record blocks with their learning areas, general average and remedial classes.
+- One sheet is saved as one record (`POST /records/create/`), filed under the class of the last block that has grades; all four blocks are kept under the record's `details`.
+- A saved sheet can be edited again, from the sheet itself or from Record Detail (**Edit on Form 137**). Teachers may edit the typed-in forms of their own class; scanned records remain staff-only.
+
+### 5. Printing
+
+- **Print** on Records, Search and Record Detail. A scanned record prints its uploaded scan; a typed-in form prints as the SF10-ES sheet, sized for long bond paper (8.5 × 13 in).
+- The browser's own header and footer (date, title, address, page number) are suppressed by printing with no page margin.
+
+### 6. Scanning the SF10-ES
+
+- The OCR reads the SF10-ES layout: two grade tables side by side, four year blocks. The page is split at the blank strip between the tables and each half is read as its own table. Blocks are named after their "Classified as Grade" line.
+- New learning areas are recognised: Language, Reading and Literacy, GMRC, Makabansa, Music & Arts, Physical Education & Health, Arabic Language, Islamic Values Education, Mother Tongue.
+- Hard scans: a grainy or faded page is read a second time from a smoothed copy and the better result kept; a row whose learning area can't be read is kept as "Unread learning area" instead of being dropped; the learner's details are read two ways and the better reading kept; a misread section is corrected to the closest one on the Sections page.
+- Accuracy figures are in [docs/OCR_PIPELINE.md](docs/OCR_PIPELINE.md). They come from generated test copies, not real scanned paper.
+
+### 7. Fixes from the comparison with the paper (section A of the weaknesses list)
+
+| Item | Change |
+|---|---|
+| Chart.js | Installed; Grade Analytics is drawn with it (`components/ui/Chart.jsx`). |
+| Analytics per grading period | Line chart of the mean grade per quarter, for all subjects or a chosen one. |
+| Subject pass rates, failing grades | Pass-rate chart per subject and a table of every subject per grading period with its failing count. New Section filter. |
+| Search | Also matches subjects, school year and the text read from the scanned form (`ocr_text`, stored for new uploads). Grade, section and school-year filters; a "Found in" column; the total when more than 50 match. |
+| ">90% confidence" rule | A grade is auto-approved only when repeated readings agree and their confidence is above `OCR_CONFIDENCE_THRESHOLD` (default 90). This sends more grades to manual review than the earlier rule. |
+| "Incomplete / For Verification" | Shown for undecided records and blank grades; Record Detail counts missing grades. |
+| Mobile | Slide-in menu and single-column layout below 900 px. |
+| HTTPS | Required whenever `DEBUG` is off (`REQUIRE_HTTPS`). |
+
+Not done: cloud hosting setup, moving accounts and scan files off local disk, and running OCR as a background job. These wait for deployment.
+
+### 8. New dependencies and settings
+
+- Backend: `pypdfium2` (run `pip install -r requirements.txt`).
+- Frontend: `chart.js` (run `npm install`).
+- `backend/.env`: `OCR_CONFIDENCE_THRESHOLD` and `REQUIRE_HTTPS`, both optional.
+
+### 9. Not yet verified
+
+Most of these screens have not been clicked through in a browser: multi-form upload, PDF upload, the SF10-ES sheet, editing, printing, the new search and the mobile layout. The backend has 45 automated tests, all passing. There are no frontend tests.
+
+---
+
 ## 2026-10-01
 
 Four changes: two bug fixes in the OCR → validation flow, a working Record Detail page, and downloads for uploaded Form 137 files.
@@ -453,8 +521,8 @@ User accounts can now be permanently deleted from User Management. Each row has 
 
 
 #to be fixed
-rbac - teacher forms per grade not showing
-upload forms- upload multiple forms
 upload - more form formats 90's- 2020's
 data analytics - "trends" ni adonis
-dashboard- updated data
+form uploads - feed new format
+pdf upload - other pdf fixes
+

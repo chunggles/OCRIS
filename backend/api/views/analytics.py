@@ -16,9 +16,12 @@ def analytics_dashboard(request):
     filters = {
         'school_year': query_param(request, 'school_year'),
         'grade_level': query_param(request, 'grade'),
+        'section': query_param(request, 'section'),
         **scope,
     }
     data = db.get_analytics(filters)
+    # A subject is flagged for intervention when its class mean is failing. Subjects where some
+    # pupils fail but the mean passes are listed, with their counts, under "subjects".
     flags = [
         {'subject': subject, 'mean': mean, 'grade_level': filters['grade_level'] or 'All'}
         for subject, mean in data.get('subject_means', {}).items()

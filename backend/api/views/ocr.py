@@ -5,10 +5,10 @@ from rest_framework.response import Response
 
 from .. import db
 from ..constants import PUPIL_KEYS
-from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, run_ocr
+from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, read_scan
 from ..serializers import ValidationSubmitSerializer
 from ..services import grading, storage
-from ..utils.http import detail, no_class_assigned, not_found, page_param
+from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param
 
 
 @api_view(['POST'])
@@ -21,18 +21,6 @@ def ocr_quality(request):
     return Response(get_image_quality(file))
 
 
-def _outside_own_class(user, pupil):
-    """
-    The refusal for a teacher filing a form under a class that isn't theirs, else None.
-    Teachers only see their own class, so a form filed elsewhere would vanish from their lists.
-    """
-    if user.missing_class:
-        return no_class_assigned()
-    if not user.can_access(pupil):
-        return detail('You can only upload forms for your assigned class.', 403)
-    return None
-
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ocr_upload(request):
@@ -40,13 +28,14 @@ def ocr_upload(request):
     if not file:
         return detail('No file provided.', 400)
     pupil = {key: request.data.get(key, '') for key in PUPIL_KEYS}
-    refusal = _outside_own_class(request.user, pupil)
+    refusal = outside_own_class(request.user, pupil)
     if refusal:
         return refusal
 
     stored_name, path = storage.save_upload(file)
     try:
-        fields = run_ocr(str(path))
+        known_sections = [section['name'] for node in db.section_tree() for section in node['sections']]
+        fields, page_text = read_scan(str(path), known_sections)
     except OCRError as e:
         storage.discard(path)  # nothing was extracted, so don't keep the file
         return detail(str(e), 422)
@@ -60,6 +49,7 @@ def ocr_upload(request):
         'file_size_bytes': file.size,
         'uploaded_by': request.user.username,
         'ocr_fields': fields,
+        'ocr_text': page_text,
         'overall_conf': summary['overall_conf'],
         'flags_count': summary['flagged'],
         'null_count': summary['null_count'],
@@ -81,7 +71,7 @@ def ocr_validate(request):
         return Response(s.errors, status=400)
     data = s.validated_data
     scan_id = data['scan_id']
-    refusal = _outside_own_class(request.user, data)
+    refusal = outside_own_class(request.user, data)
     if refusal:
         return refusal
 

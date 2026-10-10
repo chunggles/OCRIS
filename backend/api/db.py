@@ -114,6 +114,7 @@ def create_record(data):
         'uploaded_by':     data.get('uploaded_by', ''),
         'scan_id':         data.get('scan_id', ''),
         'corrections':     data.get('corrections', {}),
+        'details':         data.get('details', {}),
         'created_at':      now,
         'updated_at':      now,
     })
@@ -129,14 +130,44 @@ def list_records(filters=None, page=1, size=PAGE_SIZE):
     return _paginate(records_col(), _query(filters), 'created_at', page, size)
 
 
-def search_records(q, filters=None, limit=50):
-    query = _query(filters)
+SEARCH_LIMIT = 50
+SEARCH_FIELDS = {   # record field -> how a match in it is described to the user
+    'pupil_name': 'name', 'lrn': 'LRN', 'grade_level': 'grade level', 'section': 'section', 'school_year': 'school year',
+}
+SCAN_TEXT_MATCH_LIMIT = 500
+
+
+def search_records(q, filters=None, limit=SEARCH_LIMIT):
+    """
+    (records, total number that match). A record matches when the text appears in its pupil
+    name, LRN, grade level, section or school year, in the name of one of its subjects, or in
+    the text read from its scanned form. Each record says where it matched, in "matched_in".
+    """
     # The search text is matched literally, so characters like "(" can't break the query
-    query['$or'] = [
-        {field: {'$regex': re.escape(q), '$options': 'i'}}
-        for field in ('pupil_name', 'lrn', 'section', 'grade_level')
-    ]
-    return _serialize(list(records_col().find(query, {'_id': 0}).limit(limit)))
+    escaped = re.escape(q)
+    pattern = {'$regex': escaped, '$options': 'i'}
+    subject_matches = {'$expr': {'$gt': [{'$size': {'$filter': {
+        'input': {'$objectToArray': {'$ifNull': ['$grades', {}]}},
+        'cond': {'$regexMatch': {'input': '$$this.k', 'regex': escaped, 'options': 'i'}},
+    }}}, 0]}}
+    scan_ids = [s['scan_id'] for s in scans_col().find({'ocr_text': pattern}, {'_id': 0, 'scan_id': 1}).limit(SCAN_TEXT_MATCH_LIMIT)]
+
+    query = _query(filters)
+    query['$or'] = [{field: pattern} for field in SEARCH_FIELDS] + [subject_matches]
+    if scan_ids:
+        query['$or'].append({'scan_id': {'$in': scan_ids}})
+
+    total = records_col().count_documents(query)
+    records = _serialize(list(records_col().find(query, {'_id': 0}).sort('pupil_name', 1).limit(limit)))
+    needle, in_scan_text = q.casefold(), set(scan_ids)
+    for record in records:
+        matched = [label for field, label in SEARCH_FIELDS.items() if needle in str(record.get(field) or '').casefold()]
+        if any(needle in subject.casefold() for subject in record.get('grades', {})):
+            matched.append('subject')
+        if record.get('scan_id') in in_scan_text:
+            matched.append('scanned text')
+        record['matched_in'] = matched
+    return records, total
 
 
 def record_options(filters=None):
@@ -183,6 +214,7 @@ def create_scan(data):
         'school_year':       data.get('school_year', ''),
         'lrn':               data.get('lrn', ''),
         'ocr_fields':        data.get('ocr_fields', []),
+        'ocr_text':          data.get('ocr_text', ''),   # everything read off the page, for searching
         'overall_conf':      data.get('overall_conf', 0),
         'flags_count':       data.get('flags_count', 0),
         'corrections_count': 0,
@@ -208,7 +240,7 @@ def mark_scan_saved(scan_id, record_id, corrections_count):
 
 
 def list_scans(filters=None, page=1, size=PAGE_SIZE):
-    return _paginate(scans_col(), _query(filters), 'created_at', page, size, projection={'ocr_fields': 0})
+    return _paginate(scans_col(), _query(filters), 'created_at', page, size, projection={'ocr_fields': 0, 'ocr_text': 0})
 
 
 def count_pending_scans(filters=None):
@@ -217,7 +249,7 @@ def count_pending_scans(filters=None):
 
 def pending_scans_before(cutoff):
     """Scans uploaded before cutoff that were never saved as a record."""
-    return list(scans_col().find({'outcome': 'pending', 'created_at': {'$lt': cutoff}}, {'_id': 0, 'ocr_fields': 0}))
+    return list(scans_col().find({'outcome': 'pending', 'created_at': {'$lt': cutoff}}, {'_id': 0, 'ocr_fields': 0, 'ocr_text': 0}))
 
 
 def delete_scan(scan_id):
@@ -350,11 +382,29 @@ def _to_float(value):
         return None
 
 
+GRADING_PERIODS = ('Q1', 'Q2', 'Q3', 'Q4', 'final')
+
+
+def _mean(total, count):
+    return round(total / count, 1) if count else None
+
+
 def get_analytics(filters=None):
+    """
+    Descriptive figures for the records matching the filters:
+      subject_means   {subject: mean final rating}
+      pass_rates      {grade level: % of records whose general average passes}
+      subjects        per subject: its mean for each grading period and the final rating, how
+                      many final ratings there are, and how many of them pass and fail
+      period_means    {grading period: mean over every subject}
+    Blank and unreadable grades are left out of every figure.
+    """
     records = list(records_col().find(_query(filters), {'_id': 0}))
 
-    subject_totals, subject_counts = {}, {}
     pass_counts, total_counts = {}, {}
+    sums = {}      # subject -> {period: [total, count]}
+    passed, failed = {}, {}
+    overall = {period: [0, 0] for period in GRADING_PERIODS}
 
     for record in records:
         grade = record.get('grade_level', 'Unknown')
@@ -365,13 +415,37 @@ def get_analytics(filters=None):
             pass_counts[grade] = pass_counts.get(grade, 0) + 1
 
         for subject, grades in record.get('grades', {}).items():
-            final = _to_float(grades.get('final'))
-            if final is not None:
-                subject_totals[subject] = subject_totals.get(subject, 0) + final
-                subject_counts[subject] = subject_counts.get(subject, 0) + 1
+            periods = sums.setdefault(subject, {period: [0, 0] for period in GRADING_PERIODS})
+            for period in GRADING_PERIODS:
+                value = _to_float(grades.get(period))
+                if value is None:
+                    continue
+                periods[period][0] += value
+                periods[period][1] += 1
+                overall[period][0] += value
+                overall[period][1] += 1
+                if period == 'final':
+                    tally = passed if value >= PASSING_GRADE else failed
+                    tally[subject] = tally.get(subject, 0) + 1
+
+    subjects = []
+    for subject, periods in sums.items():
+        graded = periods['final'][1]
+        subjects.append({
+            'subject': subject,
+            'means': {period: _mean(*periods[period]) for period in GRADING_PERIODS},
+            'graded': graded,
+            'passed': passed.get(subject, 0),
+            'failed': failed.get(subject, 0),
+            'pass_rate': round(passed.get(subject, 0) / graded * 100, 1) if graded else None,
+        })
+    # the subjects with the most failing final ratings come first
+    subjects.sort(key=lambda s: (-s['failed'], s['subject']))
 
     return {
         'total_records': len(records),
-        'subject_means': {s: round(subject_totals[s] / subject_counts[s], 1) for s in subject_totals},
+        'subject_means': {s['subject']: s['means']['final'] for s in subjects if s['means']['final'] is not None},
         'pass_rates': {g: round(pass_counts.get(g, 0) / total_counts[g] * 100, 1) for g in total_counts},
+        'subjects': subjects,
+        'period_means': {period: _mean(*overall[period]) for period in GRADING_PERIODS},
     }

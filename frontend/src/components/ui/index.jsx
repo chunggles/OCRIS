@@ -119,10 +119,12 @@ export function SearchInput({ value, onChange, onEnter, placeholder, style }) {
 }
 
 const REMARKS_BADGES = { Promoted: 'b-green', Retained: 'b-amber', Incomplete: 'b-blue' }
+// A record with grades still missing can't be decided; it is shown the way the school words it
+const REMARKS_LABELS = { Incomplete: 'Incomplete / For Verification' }
 
 export function RemarksBadge({ remarks }) {
   if (!remarks) return <Badge type="b-grey">Pending</Badge>
-  return <Badge type={REMARKS_BADGES[remarks] || 'b-grey'}>{remarks}</Badge>
+  return <Badge type={REMARKS_BADGES[remarks] || 'b-grey'}>{REMARKS_LABELS[remarks] || remarks}</Badge>
 }
 
 export function Pager({ page, total, size = 20, onChange }) {

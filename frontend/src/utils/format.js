@@ -1,6 +1,8 @@
 const LOCALE = 'en-PH'
 
 export const NA = 'N/A'
+// How a missing grade is labelled. Nothing is ever estimated to fill one in.
+export const FOR_VERIFICATION = 'Incomplete / For Verification'
 export const PASSING_GRADE = 75
 
 export const isNA = (v) => v === undefined || v === null || v === '' || v === NA

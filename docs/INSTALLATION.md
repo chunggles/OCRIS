@@ -58,6 +58,8 @@ On macOS or Linux, use `source venv/bin/activate` and `cp .env.example .env`.
 | `ALLOWED_HOSTS` | No | `localhost,127.0.0.1` | Host names the backend answers to, separated by commas. Add the server's name or IP address when others connect to it. |
 | `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` | Addresses the frontend may be opened from, separated by commas |
 | `TOKEN_TTL_HOURS` | No | `12` | Hours a sign-in stays valid |
+| `OCR_CONFIDENCE_THRESHOLD` | No | `90` | A grade read from a scan is auto-approved only above this confidence (%). Lower it to review fewer grades by hand, at more risk of a wrong one. |
+| `REQUIRE_HTTPS` | No | `True` when `DEBUG` is `False` | Redirects plain HTTP to HTTPS and sends cookies over HTTPS only |
 | `SEED_PASSWORD` | Yes, for seeding | none | Password given to the default accounts by `seed.py` |
 | `TESSERACT_CMD` | Only if Tesseract is not on `PATH` | empty | Full path to the Tesseract executable, e.g. `C:\Program Files\Tesseract-OCR\tesseract.exe` |
 

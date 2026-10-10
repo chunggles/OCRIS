@@ -45,7 +45,7 @@ Recorded in [CHANGELOG.md](../CHANGELOG.md).
 
 | # | Limitation | Effect |
 |---|---|---|
-| 1 | Only JPG and PNG, one image per upload. PDFs and multi-page forms are not supported. | A form with grades on two pages needs two uploads and produces two records. |
+| 1 | One page per upload: a JPG, a PNG, or the first page of a PDF. Multi-page forms are not supported. | A form with grades on two pages needs two uploads and produces two records. The other pages of a PDF are ignored, with a warning at the quality step. |
 | 2 | The grade table reader expects the column order Subject, Q1, Q2, Q3, Q4, Final, and a fixed list of nine subjects. | Other subjects are skipped. Other column layouts are misassigned or flagged. |
 | 3 | Handwritten grades are mostly flagged for manual entry. | Little time is saved on handwritten forms. |
 | 4 | OCR takes about 17 seconds per upload and runs inside the web request. | The user waits; several simultaneous uploads would slow the server. |
@@ -80,7 +80,7 @@ In suggested order of priority:
 2. **Click through every screen** with one account of each role, then run a user acceptance test with school staff.
 3. **Add automated tests for the OCR modules**, using a few sample images with known grades.
 4. **Decide how a multi-year Form 137-A should be stored.** One record per school year would make averages and remarks meaningful.
-5. **Support PDF and multi-page forms.**
+5. **Support multi-page forms**, including the back page of the SF10-ES (Grades 5 and 6), which the system has no layout for yet. (PDF files are read since 2026-10-08, first page only.)
 6. **Warn when a record for the same pupil and school year already exists.**
 7. **Move OCR to a background job** so uploads do not block the web server.
 8. **Prepare a production deployment** (items 14 to 16) and schedule `backup` and `cleanup_scans`.

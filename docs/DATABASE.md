@@ -72,14 +72,15 @@ One document per validated Form 137. Created by `POST /api/ocr/validate/`.
 | `grade_level` | string | As chosen at upload | `Grade 6` |
 | `section` | string | As typed at upload | `Sampaguita` |
 | `school_year` | string | As chosen at upload | `2024-2025` |
-| `class_adviser` | string | Reserved; not set by the current upload flow | `""` |
+| `class_adviser` | string | The adviser typed on an SF10-ES sheet; empty for scanned records | `Gloria D. Ramos` |
 | `grades` | object | Grade sheet, see below | |
 | `general_average` | string or null | Mean of numeric Final grades, one decimal place | `"86.4"` |
 | `remarks` | string | `Promoted`, `Retained` or `Incomplete` | `Promoted` |
 | `status` | string | Always `validated` | `validated` |
 | `uploaded_by` | string | Username of the person who saved the record | `g.ramos` |
-| `scan_id` | string | The scan this record was made from | `SCAN-3F9A1C2B` |
+| `scan_id` | string | The scan this record was made from; empty for a record typed in on the Fill Out Form 137 page | `SCAN-3F9A1C2B` |
 | `corrections` | object | Values entered by hand during validation, keyed by field name | `{"English I Q2": "88"}` |
+| `details` | object | The rest of a typed-in SF10-ES sheet, see below; empty for scanned records | |
 | `created_at` | datetime | When the record was saved | |
 | `updated_at` | datetime | Last change | |
 
@@ -92,7 +93,17 @@ One document per validated Form 137. Created by `POST /api/ocr/validate/`.
 }
 ```
 
-On a multi-year Form 137-A the subject key includes the year level (`English I`, `English II`).
+On a multi-year Form 137-A the subject key includes the year level (`English I`, `English II`). On a scanned SF10-ES it includes the block's grade (`Filipino Grade 4`), or `Block 1` to `Block 4` when the grade could not be read.
+
+**`details`** holds what a typed-in SF10-ES sheet has beside the record's own grades, so the sheet can be shown again for editing and printing. Text is cut to 100 characters and lists to 40 entries.
+
+| Key | Type | Description |
+|---|---|---|
+| `name_ext`, `middle_name`, `birthdate`, `sex` | string | The learner's other personal information |
+| `eligibility` | object | The eligibility section: `kinder_progress_report`, `eccd_checklist` (true or false), `school_name`, `school_id`, `school_address`, `pept_rating`, `exam_date`, `others`, `testing_center`, `remark` |
+| `blocks` | array of 4 | Each scholastic-record block as typed: `school`, `school_id`, `district`, `division`, `region`, `grade_level`, `section`, `school_year`, `adviser`, `rows` (learning area with `Q1` to `Q4` and `final`), and `remedial` (`from`, `to`, `rows`) |
+
+The record's own `grade_level`, `section`, `school_year` and `grades` are those of the last block that has grades.
 
 ### `scans`
 
@@ -111,6 +122,7 @@ One document per successful OCR run. Created by `POST /api/ocr/upload/`.
 | `school_year` | string | As chosen at upload | |
 | `lrn` | string | As typed at upload | |
 | `ocr_fields` | array | Everything OCR read, see below | |
+| `ocr_text` | string | All the text read off the page, up to 20,000 characters; used by search. Scans uploaded before 2026-10-10 do not have it. | |
 | `overall_conf` | number | Mean confidence of fields with a confidence above 0 | `88.4` |
 | `flags_count` | integer | Fields flagged for review | `14` |
 | `null_count` | integer | Blank fields | `3` |
@@ -154,6 +166,22 @@ One document per logged action. Never updated or deleted by the application.
 | `EDIT_USER` | A user account is changed | `target_user`, `fields` |
 | `RESET_PASSWORD` | The OIC sets a user's password | `target_user` |
 | `CHANGE_PASSWORD` | A user changes their own password | none |
+| `ENCODE` | A record is typed in on the Fill Out Form 137 page | `record_id`, `pupil`, `grade` |
+| `ADD_SECTION` | A section is added | `section`, `grade` |
+| `EDIT_SECTION` | A section is renamed or moved to another grade level | `section`, `grade`, `was` |
+| `DELETE_SECTION` | A section is deleted | `section`, `grade` |
+
+### `grade_levels`
+
+The section tree: one document per grade level, holding its sections. Records and user accounts store their section as plain text, so renaming or deleting a section here does not change them.
+
+| Field | Type | Description |
+|---|---|---|
+| `grade_level` | string | `Grade 1` to `Grade 6`; one document each, created when its first section is added |
+| `sections` | array | The sections of that grade level |
+| `sections[].section_id` | string | Unique ID: `SEC-<8 hex characters>` |
+| `sections[].name` | string | Section name; unique within the grade level, ignoring case |
+| `sections[].created_at`, `sections[].updated_at` | datetime | |
 
 ### `users`
 

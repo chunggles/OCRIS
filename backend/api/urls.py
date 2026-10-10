@@ -9,8 +9,9 @@ urlpatterns = [
     path('auth/me/',     auth.me_view,     name='me'),
     path('auth/change-password/', auth.change_password_view, name='change-password'),
 
-    # Records ("search" and "options" must come before the <record_id> routes)
+    # Records ("create", "search" and "options" must come before the <record_id> routes)
     path('records/',                        records.records_list,    name='records-list'),
+    path('records/create/',                 records.record_create,   name='record-create'),
     path('records/search/',                 records.records_search,  name='records-search'),
     path('records/options/',                records.records_options, name='records-options'),
     path('records/<str:record_id>/',        records.record_detail,  name='record-detail'),

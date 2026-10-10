@@ -1,8 +1,11 @@
 """Saving uploaded Form 137 files and finding them again for download."""
+import logging
 import uuid
 from pathlib import Path
 
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def scans_dir():
@@ -41,5 +44,5 @@ def discard(path):
     """Remove a just-saved upload that won't be kept (e.g. OCR failed)."""
     try:
         path.unlink()
-    except OSError:
-        pass
+    except OSError as e:
+        logger.warning(f'Could not remove {path.name}; it is left in the scans folder: {e}')

@@ -63,22 +63,24 @@ backend/
     db.py                   every MongoDB read and write
     views/
       auth.py               login, logout, current user, change password
-      records.py            list, search, filter options, detail, update, delete
+      records.py            list, search, filter options, detail, create (typed-in forms), update, delete
       ocr.py                quality check, upload, validate, download, history
       analytics.py          grade analytics
+      sections.py           the section tree: list, add, edit, delete
       users.py              user management
       audit.py              audit log
     services/
       grading.py            builds the grade sheet, average, and remarks
       storage.py            saves and finds uploaded files
     ocr/
-      engine.py             run_ocr entry point, error handling
+      engine.py             read_scan / run_ocr entry points, error handling, retry on a smoothed copy
+      pdf.py                opens a scan as an image; renders page 1 of a PDF
       quality.py            image quality measurements
       preprocess.py         straightening and clean-up before OCR
-      table.py              reads the grade table cell by cell
+      table.py              reads the grade table cell by cell; one or two table columns (SF10-ES)
       parser.py             subject names; free-text fallback parser
       pupil.py              reads name, LRN, grade, section, school year
-    utils/http.py           small request and response helpers
+    utils/http.py           small request and response helpers; the teacher's-own-class check
 ```
 
 ### Layering
@@ -108,18 +110,26 @@ frontend/src/
     useFetch.js             load-data hook (data, loading, error, refetch)
     useObjectUrl.js         image previews
     useRecordOptions.js     filter choices taken from saved records
+    useClassPicker.js       grade and section choices from the section tree; locked for teachers
     format.js               dates, N/A checks, error messages
     compare.js              tolerant text comparison
   components/
     layout/Sidebar.jsx      navigation
-    layout/Topbar.jsx       page title, sign out
+    layout/Topbar.jsx       page title, menu button on narrow screens, change password, sign out
+    layout/ChangePasswordModal.jsx
     ui/index.jsx            Card, Btn, Badge, Pager, EmptyState, ...
     ui/DownloadScanBtn.jsx  download button for the original scan
+    ui/ScanPreview.jsx      shows an uploaded scan (image or PDF)
+    ui/Chart.jsx            Chart.js charts for Grade Analytics
+  assets/                   DepEd seal and logo for the SF10-ES sheet
   pages/
     LoginPage, DashboardPage, UploadPage, RecordsPage, RecordDetailPage,
-    SearchPage, AnalyticsPage, HistoryPage, UsersPage, AuditPage
+    SearchPage, AnalyticsPage, HistoryPage, UsersPage, AuditPage,
+    SectionsPage, FillFormPage
     upload/                 one component per upload step
     users/                  add form, edit dialog, permission matrix
+    sections/               add/edit and delete-confirmation windows
+    form137/                the SF10-ES sheet (sheet.jsx) and the print button
   styles/                   global.css, components.css, pages.css
 ```
 

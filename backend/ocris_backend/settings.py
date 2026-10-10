@@ -62,6 +62,18 @@ TEMPLATES = [{
     ]},
 }]
 
+# ── HTTPS ────────────────────────────────────────────────────────────────────
+# Outside local development every request must use HTTPS: plain HTTP is redirected, browsers
+# are told to keep using HTTPS, and cookies are sent over HTTPS only. Set REQUIRE_HTTPS=False
+# in .env only for a server that genuinely has no HTTPS in front of it.
+REQUIRE_HTTPS = os.getenv('REQUIRE_HTTPS', str(not DEBUG)).lower() == 'true'
+if REQUIRE_HTTPS:
+    SECURE_SSL_REDIRECT = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')   # set by the host's load balancer
+    SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 # ── Databases ────────────────────────────────────────────────────────────────
 # SQLite holds Django auth (users, tokens); MongoDB holds records, scans and the audit log.
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
@@ -93,7 +105,9 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
-OCR_CONFIDENCE_THRESHOLD = 90
+# A grade read from a scan is auto-approved only above this confidence (%); anything else is
+# flagged for a person to check. Lower it in .env to review less, at more risk of a wrong grade.
+OCR_CONFIDENCE_THRESHOLD = float(os.getenv('OCR_CONFIDENCE_THRESHOLD', '90'))
 OCR_LANG = 'eng'
 # Full path to tesseract.exe if it isn't on PATH (Windows), e.g. C:\Program Files\Tesseract-OCR\tesseract.exe
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', '')

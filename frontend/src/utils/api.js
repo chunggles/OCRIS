@@ -66,6 +66,7 @@ export const authAPI = {
 export const recordsAPI = {
   list:    (params = {})   => request(`/records/?${qs(params)}`),
   options: ()              => request('/records/options/'),
+  create:  (data)          => request('/records/create/', withBody('POST', data)),
   get:    (id)             => request(`/records/${id}/`),
   search: (q, params = {}) => request(`/records/search/?${qs({ q, ...params })}`),
   update: (id, data)       => request(`/records/${id}/update/`, withBody('PATCH', data)),
@@ -87,6 +88,12 @@ export const ocrAPI = {
   upload:       (file, pupilInfo) => postFile('/ocr/upload/', file, pupilInfo),
   validate: (payload)  => request('/ocr/validate/', withBody('POST', payload)),
   history:  (page = 1) => request(`/ocr/history/?${qs({ page })}`),
+  // The original uploaded file as a Blob, for showing or printing it in the page
+  scanBlob: async (scanId) => {
+    const res = await send(`/ocr/scans/${encodeURIComponent(scanId)}/file/`)
+    if (!res.ok) throw { status: res.status, data: await res.json().catch(() => ({})) }
+    return res.blob()
+  },
   downloadFile: async (scanId, fallbackName = 'form137') => {
     const res = await send(`/ocr/scans/${encodeURIComponent(scanId)}/file/`)
     if (!res.ok) throw { status: res.status, data: await res.json().catch(() => ({})) }

@@ -3,6 +3,7 @@ import { useApp } from '../context/AppContext'
 import { GRADE_LEVELS, isStaffRole } from '../data/constants'
 import { Card, Btn, StatusBanner, EmptyState, Pager, PageHeader, RemarksBadge } from '../components/ui/index'
 import DownloadScanBtn from '../components/ui/DownloadScanBtn'
+import PrintFormBtn from './form137/PrintFormBtn'
 import { recordsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { formatDate, isNA } from '../utils/format'
@@ -37,6 +38,7 @@ function RecordRow({ record: r, onDelete }) {
       <td>
         <div className="btn-row">
           <Btn size="sm" onClick={() => nav('detail', { recordId: r.record_id })} disabled={!r.record_id}>View</Btn>
+          <PrintFormBtn record={r}/>
           <DownloadScanBtn scanId={r.scan_id}/>
           {r.record_id && isStaffRole(user?.role) && <Btn variant="danger" size="sm" onClick={() => onDelete(r)}>Delete</Btn>}
         </div>

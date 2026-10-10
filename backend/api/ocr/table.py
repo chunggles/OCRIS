@@ -48,14 +48,26 @@ RULE_DARKNESS = 0.25         # share of the paper-to-ink range a pixel must dark
 MERGED_ROW_FACTOR = 1.6      # a table row this many times taller than usual is two rows merged
 MIN_SPLIT_COVERAGE = 0.2     # weakest rule coverage accepted when splitting a merged row
 
+# Two tables side by side (SF10-ES)
+GUTTER_ZONE = (0.30, 0.96)   # share of the page height holding the grade tables, below the header boxes
+GUTTER_SEARCH = (0.42, 0.58)  # share of the page width where the strip between the tables can be
+GUTTER_MAX_INK = 0.006       # a strip column may be inked over at most this share of the zone (specks)
+GUTTER_MIN_WIDTH = 4         # px
+BLOCK_BAND_TOLERANCE = 0.05  # blocks starting within this share of the page height sit side by side
+CLASS_LINE_ABOVE = (6.2, 1.2)  # the school/class lines lie this many row heights above a block's first subject
+CLASS_GRADE_RE = re.compile(r'^[:_\s]*([1-6])[_.\s]*$')
+
 # Cell reading
 CELL_INSET = 3               # px trimmed inside each cell so borders don't reach the OCR
 CELL_PADDING = 16            # px of white added around each crop
 MIN_CELL_INK = 0.006         # share of dark pixels below which a cell counts as blank
 SUBJECT_HEIGHT = 64          # px; subject cells are scaled to this height before reading
+SUBJECT_RETRY_HEIGHTS = (48, 96)  # tried in turn when a grade-table row's first cell matches no subject
 # Each grade cell is read at all of these heights. It is auto-approved only if at least
 # MIN_AGREEMENT readings give the same valid grade, none gives a different valid grade, and
-# their mean Tesseract confidence is at least MIN_MEAN_CONF. Calibrated on the Form 137-A
+# their mean Tesseract confidence is above settings.OCR_CONFIDENCE_THRESHOLD (90 by default:
+# "high-confidence extractions (>90%) are auto-approved"). MIN_MEAN_CONF is used if that
+# setting is missing. Calibrated on the Form 137-A
 # mockup in 12 variants (94–294 DPI, tilted, blurred, JPEG q25–60, noisy; 1,080 cells):
 # 788 correct grades auto-approved, 0 wrong ones; everything else was flagged for review.
 VOTE_HEIGHTS = (48, 40, 56, 32)
@@ -78,8 +90,22 @@ FUZZY_SUBJECTS = [
     ('Technology and Livelihood Education', 'EPP / TLE'),
     ('MAPEH', 'MAPEH'),
     ('MAKABAYAN', 'MAKABAYAN'),
+    ('Makabansa', 'Makabansa'),
+    ('Reading and Literacy', 'Reading and Literacy'),
+    ('Language', 'Language'),
+    ('GMRC', 'GMRC'),
+    ('Music & Arts', 'Music & Arts'),
+    ('Physical Education & Health', 'Physical Education & Health'),
+    ('Arabic Language', 'Arabic Language'),
+    ('Islamic Values Education', 'Islamic Values Education'),
 ]
 FUZZY_MIN_RATIO = 0.8
+UNREAD_SUBJECT = 'Unread learning area'   # name given to a row with grades whose learning area couldn't be read
+UNREAD_MIN_HEIGHT_SHARE = 0.85   # an unread row is about as tall as the block's recognised rows
+UNREAD_MIN_LETTERS = 3      # letters read in a first cell for it to count as an unreadable name...
+UNREAD_MIN_INK = 0.03       # ...or this share of the cell inked, when no letters could be read
+NOT_A_SUBJECT_RATIO = 0.6   # a first cell this much like "General Average" is that row, not a learning area
+FUZZY_MIN_RATIO_IN_TABLE = 0.7   # for the first cell of a row that has the grade columns
 
 ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI']
 # Year level written after the subject, optionally after "(AP)"-style abbreviations.
@@ -254,7 +280,9 @@ def read_grade_cell(grey, ink, box):
 
     if len(grade_confs) == 1:
         value, confs = next(iter(grade_confs.items()))
-        agreed = len(confs) >= MIN_AGREEMENT and mean(confs) >= MIN_MEAN_CONF
+        threshold = getattr(settings, 'OCR_CONFIDENCE_THRESHOLD', None)
+        confident = mean(confs) > threshold if threshold is not None else mean(confs) >= MIN_MEAN_CONF
+        agreed = len(confs) >= MIN_AGREEMENT and confident
         return value, value, round(mean(confs)), 'ok' if agreed else 'warn'
 
     if len(grade_confs) > 1:
@@ -269,8 +297,9 @@ def read_grade_cell(grey, ink, box):
 
 # ── Subject rows and year blocks ─────────────────────────────────────────────
 
-def _fuzzy_subject(text):
+def _fuzzy_subject(text, min_ratio=None):
     """(subject, end index) when the leading words closely match a subject name."""
+    min_ratio = min_ratio or FUZZY_MIN_RATIO
     words = list(re.finditer(r'\S+', text))
     best = None
     for phrase, subject in FUZZY_SUBJECTS:
@@ -279,7 +308,7 @@ def _fuzzy_subject(text):
             continue
         candidate = text[words[0].start():words[n - 1].end()]
         ratio = difflib.SequenceMatcher(None, candidate.casefold(), phrase.casefold()).ratio()
-        if ratio >= FUZZY_MIN_RATIO and (best is None or ratio > best[0]):
+        if ratio >= min_ratio and (best is None or ratio > best[0]):
             best = (ratio, subject, words[n - 1].end())
     return (best[1], best[2]) if best else None
 
@@ -305,8 +334,9 @@ class SubjectRow(NamedTuple):
 
 def _identify_subject_rows(grey, ink, rows, row_columns):
     """
-    SubjectRows for rows whose first cell names a subject. Only the first two rules of a
-    row are needed here; the grade columns come from the block layout.
+    (SubjectRows for rows whose first cell names a subject, {row index: text} for the other
+    rows with a name written in their first cell that couldn't be matched). Only the first two rules of a row are
+    needed here; the grade columns come from the block layout.
     """
     candidates = []
     for i, ((top, bottom), columns) in enumerate(zip(rows, row_columns)):
@@ -317,16 +347,41 @@ def _identify_subject_rows(grey, ink, rows, row_columns):
         if _ink_share(ink, box) >= MIN_CELL_INK:
             candidates.append((i, box))
 
-    with ThreadPoolExecutor(WORKERS) as pool:
-        reads = list(pool.map(lambda c: _read(_prepare_cell(grey, c[1], SUBJECT_HEIGHT), TEXT_CONFIG), candidates))
+    def read(candidate):
+        """(text, conf, match) for a subject cell. A grade-table row that matches no subject is read
+        again at other sizes: on low-resolution scans a bold name can come out as "Lanquaae"."""
+        i, box = candidate
+        heights = (SUBJECT_HEIGHT,) + (SUBJECT_RETRY_HEIGHTS if len(row_columns[i]) >= len(GRADE_COLUMNS) + 2 else ())
+        text, conf = '', 0
+        in_grade_table = len(heights) > 1
+        texts = []
+        for height in heights:
+            text, conf = _read(_prepare_cell(grey, box, height), TEXT_CONFIG)
+            match = _match_subject(text)
+            if match or not text:
+                return text, conf, match
+            texts.append((text, conf))
+        if in_grade_table:
+            # Still nothing: inside a grade table the first cell can only be a learning area, a
+            # blank or "General Average", so a looser likeness is enough ("Lanauaae" is Language)
+            for text, conf in texts:
+                match = _fuzzy_subject(text, FUZZY_MIN_RATIO_IN_TABLE)
+                if match:
+                    return text, conf, match
+        return text, conf, None
 
-    subject_rows = []
-    for (i, _), (text, conf) in zip(candidates, reads):
-        match = _match_subject(text)
+    with ThreadPoolExecutor(WORKERS) as pool:
+        reads = list(pool.map(read, candidates))
+
+    candidates_box = dict(candidates)
+    subject_rows, unread = [], {}
+    for (i, _), (text, conf, match) in zip(candidates, reads):
         if match:
             subject, end = match
             subject_rows.append(SubjectRow(i, subject, _level_after(text, end), conf))
-    return subject_rows
+        elif len(re.findall(r'[A-Za-z]', text)) >= UNREAD_MIN_LETTERS or _ink_share(ink, candidates_box[i]) >= UNREAD_MIN_INK:
+            unread[i] = text
+    return subject_rows, unread
 
 
 def _group_blocks(subject_rows):
@@ -383,43 +438,252 @@ def _block_level(block, block_index, block_count):
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
-def parse_grade_table(grey):
-    """
-    (grade fields read cell by cell, year levels read). Year levels are (level, conf)
-    pairs in page order. Returns None if no ruled grade table with subjects was found.
-    """
+class _Table(NamedTuple):
+    """One ruled table area (the whole page, or one half of a two-column page) and its year blocks."""
+    grey: Image.Image
+    ink: Image.Image
+    rows: list            # (top, bottom) of every band between horizontal rules
+    blocks: list          # [(subject rows of the block, its grade cells or Nones)]
+
+
+def _find_table(grey, join_across_blank_rows=False):
+    """The subject rows of a table area, grouped into year blocks, or None if it has none."""
     cutoff = ink_threshold(grey)
     ink = grey.point(lambda p: 255 if p < cutoff else 0)
     rules = rule_mask(grey)
     rows = find_rows(rules)
     rows, row_columns = split_merged_rows(rules, ink, rows, confirmed_columns(ink, rows))
-    subject_rows = _identify_subject_rows(grey, ink, rows, row_columns)
+    subject_rows, unread = _identify_subject_rows(grey, ink, rows, row_columns)
     if not subject_rows:
         return None
-
-    blocks = _group_blocks(subject_rows)
-    jobs, seen, year_levels = [], {}, []   # jobs: (field name, cell box or None if the columns can't be located)
-    for b, block in enumerate(blocks):
-        level, level_conf, was_read = _block_level(block, b, len(blocks))
-        if was_read:
-            year_levels.append((level, level_conf))
+    groups = _group_blocks(subject_rows)
+    if join_across_blank_rows:
+        groups = [_with_unread_rows(block, unread, rows, row_columns) for block in _join_same_grid(groups, row_columns)]
+    blocks = []
+    for block in groups:
         layout = _block_layout(block, row_columns)
-        grade_cells = _cells(layout)[1:len(GRADE_COLUMNS) + 1] if layout else [None] * len(GRADE_COLUMNS)
-        for row in block:
-            label = f'{row.subject} {level}' if level else row.subject
-            seen[label] = seen.get(label, 0) + 1
-            if seen[label] > 1:
-                label = f'{label} #{seen[label]}'
-            top, bottom = rows[row.index]
-            for column, cell in zip(GRADE_COLUMNS, grade_cells):
-                jobs.append((f'{label} {column}', _cell_box(*cell, top, bottom) if cell else None))
+        blocks.append((block, _cells(layout)[1:len(GRADE_COLUMNS) + 1] if layout else [None] * len(GRADE_COLUMNS)))
+    return _Table(grey, ink, rows, blocks)
 
+
+def _join_same_grid(groups, row_columns):
+    """
+    Join blocks that are parts of one printed table: every row between them has the grade
+    columns, and no subject repeats. On the SF10-ES the pre-printed subjects at the top of a
+    table and "*Arabic Language" near its bottom are separated only by empty rows.
+    """
+    joined = []
+    for block in groups:
+        if joined:
+            previous = joined[-1]
+            between = range(previous[-1].index, block[0].index + 1)
+            # every row in between has the grade columns; a speck or a faint rule may add or drop one
+            same_grid = all(len(row_columns[i]) >= len(GRADE_COLUMNS) + 2 for i in between)
+            repeated = {row.subject for row in previous} & {row.subject for row in block}
+            if same_grid and not repeated:
+                previous.extend(block)
+                continue
+        joined.append(list(block))
+    return joined
+
+
+def _with_unread_rows(block, unread, rows, row_columns):
+    """
+    The block plus the rows inside it whose learning area couldn't be read. Such a row still
+    has grades, and leaving it out would lose them without anyone noticing, so it is kept under
+    the name UNREAD_SUBJECT for a person to see. The row must be a full-height row of the
+    table with a name written in its first cell. Only rows between the block's first and last
+    recognised subjects are taken: above them is the table's heading (whose "1 2 3 4" would
+    pass for grades), below them "General Average".
+    """
+    def is_grade_row(i):
+        return len(row_columns[i]) >= len(GRADE_COLUMNS) + 2
+
+    def height(i):
+        return rows[i][1] - rows[i][0]
+
+    # A stray rule can cut a sliver off a row; a sliver is not a row of the table
+    heights = sorted(height(row.index) for row in block)
+    full_height = UNREAD_MIN_HEIGHT_SHARE * heights[len(heights) // 2]
+
+    def is_unread_subject(i):
+        text = unread.get(i)
+        if text is None or not is_grade_row(i) or height(i) < full_height:
+            return False
+        return difflib.SequenceMatcher(None, text.casefold(), 'general average').ratio() < NOT_A_SUBJECT_RATIO
+
+    first, last = block[0].index, block[-1].index
+    known = {row.index for row in block}
+    extra = [i for i in range(first, last) if i not in known and is_unread_subject(i)]
+    return sorted(block + [SubjectRow(i, UNREAD_SUBJECT, None, 0) for i in extra], key=lambda row: row.index)
+
+
+def _block_jobs(table, block, grade_cells, label_of):
+    """(field name, table, cell box or None) for every grade cell of a block's subject rows."""
+    jobs = []
+    for row in block:
+        top, bottom = table.rows[row.index]
+        label = label_of(row)
+        for column, cell in zip(GRADE_COLUMNS, grade_cells):
+            jobs.append((f'{label} {column}', table, _cell_box(*cell, top, bottom) if cell else None))
+    return jobs
+
+
+def _read_jobs(jobs):
+    """Grade fields for jobs, reading the cells in parallel."""
     def read(job):
+        _, table, box = job
         # A subject whose grade columns couldn't be located is still listed, flagged for manual entry
-        return read_grade_cell(grey, ink, job[1]) if job[1] else ('?', '?', 0, 'warn')
+        return read_grade_cell(table.grey, table.ink, box) if box else ('?', '?', 0, 'warn')
 
     with ThreadPoolExecutor(WORKERS) as pool:
         results = list(pool.map(read, jobs))
+    return [make_field(name, raw, value, conf, status) for (name, _, _), (value, raw, conf, status) in zip(jobs, results)]
 
-    fields = [make_field(name, raw, value, conf, status) for (name, _), (value, raw, conf, status) in zip(jobs, results)]
-    return fields, year_levels
+
+def _unique_labeller(suffix_of):
+    """Field label for a subject row: the subject plus its block's suffix, numbered if it repeats."""
+    seen = {}
+
+    def label_of(row):
+        suffix = suffix_of(row)
+        label = f'{row.subject} {suffix}' if suffix else row.subject
+        seen[label] = seen.get(label, 0) + 1
+        return f'{label} #{seen[label]}' if seen[label] > 1 else label
+    return label_of
+
+
+def _parse_single(grey):
+    """A page with one table column (Form 137, Form 137-A): year blocks stacked down the page."""
+    table = _find_table(grey)
+    if not table:
+        return None
+    levels, year_levels = {}, []
+    for b, (block, _) in enumerate(table.blocks):
+        level, level_conf, was_read = _block_level(block, b, len(table.blocks))
+        if was_read:
+            year_levels.append((level, level_conf))
+        levels.update({row.index: level for row in block})
+    label_of = _unique_labeller(lambda row: levels[row.index])
+    jobs = [job for block, cells in table.blocks for job in _block_jobs(table, block, cells, label_of)]
+    return _read_jobs(jobs), year_levels
+
+
+# ── Two tables side by side (SF10-ES) ────────────────────────────────────────
+
+def find_gutter(grey):
+    """
+    (left edge, right edge) of the blank strip between two grade tables printed side by side,
+    as on the SF10-ES, or None for a page with a single table column. The strip must be clear
+    of ink over the whole table area; on a single-column form every row rule crosses it.
+    """
+    cutoff = ink_threshold(grey)
+    ink = grey.point(lambda p: 255 if p < cutoff else 0)
+    width, height = ink.size
+    coverage = _column_coverage(ink, round(height * GUTTER_ZONE[0]), round(height * GUTTER_ZONE[1]))
+    lo, hi = round(width * GUTTER_SEARCH[0]), round(width * GUTTER_SEARCH[1])
+    clear = _runs([1 if c <= GUTTER_MAX_INK else 0 for c in coverage[lo:hi]], 1)
+    if not clear:
+        return None
+    start, end = max(clear, key=lambda run: run[1] - run[0])
+    # A real gutter is a narrow strip with a table's edge on each side. A clear run reaching the
+    # end of the search area is just an empty part of the page.
+    bounded = start > 0 and end < hi - lo - 1
+    return (lo + start, lo + end) if bounded and end - start + 1 >= GUTTER_MIN_WIDTH else None
+
+
+def _classified_grade(table, block):
+    """
+    (grade number, conf) from the "Classified as Grade: 4" line printed above a block, or None.
+    Only the strip between the previous table and this block's header is read.
+    """
+    first_top, first_bottom = table.rows[block[0].index]
+    row_height = first_bottom - first_top
+    top = max(round(first_top - CLASS_LINE_ABOVE[0] * row_height), 0)
+    bottom = round(first_top - CLASS_LINE_ABOVE[1] * row_height)
+    if bottom - top < row_height:
+        return None
+    strip = ImageOps.autocontrast(table.grey.crop((0, top, table.grey.width, bottom)))
+    data = pytesseract.image_to_data(strip, lang=getattr(settings, 'OCR_LANG', 'eng'), config='--psm 6 --oem 1',
+                                     output_type=pytesseract.Output.DICT)
+    words = [(w.strip(), float(c)) for w, c in zip(data['text'], data['conf']) if w.strip()]
+    for i, (word, _) in enumerate(words):
+        if not word.lower().startswith('grade'):
+            continue
+        # The number follows "Grade:", sometimes glued to it or to the underline of the blank
+        for text, conf in [(word[5:], words[i][1])] + words[i + 1:i + 3]:
+            m = CLASS_GRADE_RE.match(text)
+            if m:
+                return int(m.group(1)), max(round(conf), 0)
+            if text.strip(':_ ') and not text.lower().startswith('grade'):
+                break  # some other word follows: the blank was left empty
+    return None
+
+
+def _parse_side_by_side(grey, gutter):
+    """
+    SF10-ES: up to four year blocks, two tables wide. Each half of the page is read as its own
+    table. Blocks are named after their "Classified as Grade", or their position when that
+    can't be read; blocks and subject rows left completely empty are dropped.
+    """
+    halves = [grey.crop((0, 0, gutter[1], grey.height)), grey.crop((gutter[0], 0, grey.width, grey.height))]
+    found = []   # (top of block, half index, table, block, grade cells)
+    for h, half in enumerate(halves):
+        table = _find_table(half, join_across_blank_rows=True)
+        for block, cells in (table.blocks if table else []):
+            # A learning area typed in the Remedial Classes table sits in a table with too few
+            # columns for quarterly grades; it is not a year block
+            if cells[0] is not None:
+                found.append((table.rows[block[0].index][0], h, table, block, cells))
+    if not found:
+        return None
+    # Reading order: across each band of the page, then down. Blocks of one band start at about the same height.
+    band = grey.height * BLOCK_BAND_TOLERANCE
+    found.sort(key=lambda f: (round(f[0] / band), f[1]))
+
+    # A block is named after its grade only when the grades read make sense together: a pupil's
+    # blocks run in order, so a repeat or a step backwards means one was misread (a handwritten
+    # 1 as a 2, say). The whole form then falls back to block numbers, which are never wrong.
+    grades = [_classified_grade(table, block) for _, _, table, block, _ in found]
+    read = [g[0] for g in grades if g]
+    trusted = all(a < b for a, b in zip(read, read[1:]))
+    suffixes, levels = {}, []
+    for n, ((_, h, _, block, _), grade) in enumerate(zip(found, grades), start=1):
+        named = bool(grade) and trusted
+        if named:
+            levels.append((f'Grade {grade[0]}', grade[1]))
+        suffixes.update({(h, row.index): f'Grade {grade[0]}' if named else f'Block {n}' for row in block})
+
+    fields = []
+    half_of = {}   # one labeller for the page, so two blocks read as the same grade still get distinct names
+    label_of = _unique_labeller(lambda row: suffixes[(half_of[id(row)], row.index)])
+    for _, h, table, block, cells in found:
+        half_of.update({id(row): h for row in block})
+        block_fields = _read_jobs(_block_jobs(table, block, cells, label_of))
+        per_row = len(GRADE_COLUMNS)
+        for i in range(0, len(block_fields), per_row):
+            row_fields = block_fields[i:i + per_row]
+            if any(f['status'] != 'null' for f in row_fields):
+                fields.extend(row_fields)
+    if not fields:
+        # Nothing is filled in anywhere: report the first block's rows so the caller can say so
+        _, h, table, block, cells = found[0]
+        fields = _read_jobs(_block_jobs(table, block, cells, _unique_labeller(lambda row: suffixes[(h, row.index)])))
+        return fields, levels
+    return fields, levels
+
+
+# ── Entry point ──────────────────────────────────────────────────────────────
+
+def parse_grade_table(grey):
+    """
+    (grade fields read cell by cell, levels read). Levels are (label, conf) pairs in page
+    order: the year level written after the subjects on a Form 137-A ("I", "II"), or each
+    block's "Grade N" on an SF10-ES. Returns None if no ruled grade table with subjects was found.
+    """
+    gutter = find_gutter(grey)
+    if gutter:
+        result = _parse_side_by_side(grey, gutter)
+        if result:
+            return result
+    return _parse_single(grey)

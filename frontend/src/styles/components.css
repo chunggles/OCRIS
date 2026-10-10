@@ -177,6 +177,8 @@ th.center,td.center,.center{text-align:center}
 .queue-body{flex:1;min-width:0}
 .queue-file{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:12px;margin-bottom:6px;overflow-wrap:anywhere}
 .batch-progress{background:var(--blue-l);color:#1A3060;border-radius:var(--radius-sm);padding:8px 12px;font-size:12px;margin-bottom:14px;overflow-wrap:anywhere}
+.queue-thumb{display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--text-3)}
+.scan-pdf{display:block;width:100%;height:62vh;border:1px solid var(--border);border-radius:6px;background:#f8f8f8;margin-bottom:12px}
 .guideline{display:flex;gap:8px;font-size:12px;color:var(--text-2);margin-bottom:8px}
 .guideline-tag{font-weight:700;flex-shrink:0;width:34px}
 .metric-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:2px}
@@ -211,3 +213,104 @@ th.center,td.center,.center{text-align:center}
 .success-title{font-size:20px;font-weight:700;margin-bottom:6px}
 .success-sub{font-size:13px;color:var(--text-3);margin-bottom:20px}
 .success-details{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:20px;text-align:left;min-width:320px}
+/* Narrow screens (tablets held upright, phones). The menu slides in from the left, grids fall
+   into one column, and anything wider than the screen scrolls sideways inside its own card. */
+.topbar-title{display:flex;align-items:center;gap:10px;min-width:0}
+.menu-btn{display:none;align-items:center;justify-content:center;width:34px;height:34px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface);color:var(--text-2);cursor:pointer;flex-shrink:0}
+.menu-btn svg{width:18px;height:18px}
+.sidebar-scrim{display:none}
+.sheet-scroll{overflow-x:auto}
+@media (max-width:900px){
+  .menu-btn{display:inline-flex}
+  .sidebar{position:fixed;left:0;top:0;z-index:900;transform:translateX(-100%);transition:transform .2s ease;box-shadow:4px 0 24px rgba(0,0,0,.25)}
+  .sidebar.open{transform:none}
+  .sidebar-scrim{display:block;position:fixed;inset:0;z-index:899;background:rgba(0,0,0,.4)}
+  .topbar{padding:0 12px;gap:8px}
+  .topbar-actions .btn{padding:5px 8px;font-size:11px}
+  .breadcrumb{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .page-wrap{padding:14px 12px}
+  .g2,.g-3-2,.stats,.review-layout,.form-row-3{grid-template-columns:1fr}
+  .g4{grid-template-columns:1fr 1fr}
+  .ocr-grid{grid-template-columns:1fr 1fr}
+  .card{padding:14px;overflow-x:auto}
+  .card-hd{flex-wrap:wrap;gap:6px}
+  .step-tabs{width:100%;overflow-x:auto}
+  .step-tab{white-space:nowrap}
+  .success-details{min-width:0;width:100%}
+  .info-lbl{width:120px}
+  .bar-nm{width:96px}
+}
+@media (max-width:520px){
+  .g4,.form-row-2,.ocr-grid{grid-template-columns:1fr}
+  .topbar-actions .btn{padding:5px 6px}
+  .queue-item{flex-wrap:wrap}
+}
+/* On-screen SF10-ES (formerly Form 137): the printed front page as a sheet you type on. Every
+   size is in em, so the sheet scales as one piece: 84em wide, 12px type on screen, and a type
+   size on paper that makes the same 84em fill the width of long bond. Entries are in blue ink.
+   The sheet is also scanned back in; see the note at the top of pages/form137/sheet.jsx. */
+.sf10{box-sizing:content-box;width:84em;font-size:12px;line-height:1.2;background:#fff;color:#000;margin:0 auto 24px;padding:2.2em 2.6em 2em;border:1px solid var(--border);box-shadow:0 2px 10px rgba(0,0,0,.08);font-family:Arial,Helvetica,sans-serif}
+.sf-head{position:relative;display:flex;align-items:center;justify-content:space-between;height:7.2em;padding:0 3em;margin-bottom:.5em}
+.sf-formno{position:absolute;left:0;top:0;font-size:.8em;font-weight:700}
+.sf-seal{height:7.2em}.sf-logo{height:5.6em}
+.sf-titles{text-align:center;font-size:1.25em;line-height:1.25}
+.sf-title{font-size:1.2em;font-weight:700}
+.sf-formerly{font-size:.65em;font-style:italic}
+.sf-band{background:#BFBFBF;border:1px solid #000;text-align:center;font-weight:700;font-size:.95em;padding:.12em;margin-top:.5em}
+.sf-band-lg{font-size:1.15em}
+.sf-box{border:1px solid #000;border-top:none;padding:0 .3em .35em}
+.sf-line{display:flex;align-items:flex-end;gap:.4em;margin-top:.55em;white-space:nowrap}
+.sf-indent{padding-left:5em}
+.sf-in{box-sizing:border-box;border:none;border-bottom:1px solid #000;border-radius:0;background:transparent;font:inherit;color:#1B3A8C;height:1.35em;padding:0 .3em;min-width:0;width:100%;outline:none}
+.sf-in.center{text-align:center;text-align-last:center}
+.sf-in:focus,.sf-cell:focus{background:#EEF3FB}
+select.sf-in{appearance:none;-webkit-appearance:none;cursor:pointer;padding:0}
+.sf-static{display:inline-block;overflow:hidden;text-overflow:ellipsis;line-height:1.3}
+.sf-tick{display:inline-flex;align-items:center;gap:.4em}
+.sf-tick input{width:1em;height:1em;margin:0;accent-color:#1B3A8C}
+.sf-pair{display:grid;grid-template-columns:1fr 1fr;gap:.8em;margin-top:.5em}
+.sf-block{min-width:0}
+.sf-class{border:1px solid #000;border-bottom:none;padding:0 .3em .35em;font-size:.95em}
+.sf-table{width:100%;border-collapse:collapse;table-layout:fixed;border:2px solid #000;font-size:1em}
+.sf-table th,.sf-table td{border:1px solid #000;padding:0;background:#fff;color:#000;text-align:center;vertical-align:middle;font-size:.95em;white-space:normal;height:1.75em;line-height:1.1}
+.sf-table th{font-weight:700;font-size:.9em;padding:.1em .2em}
+.sf-table tr:hover td{background:#fff}
+.sf-cell{box-sizing:border-box;display:block;width:100%;height:1.7em;border:none;background:transparent;font:inherit;font-size:1.05em;color:#1B3A8C;text-align:center;padding:0 .15em;outline:none}
+.sf-cell.left{text-align:left;padding-left:.35em;color:#000;font-weight:700;font-size:.95em}
+.sf-remedial .sf-cell.left{font-weight:400;color:#1B3A8C}
+.sf-cell.bad{background:var(--rose-l);color:var(--rose)}
+.sf-cell::placeholder{color:#9AA9C9}
+.sf-in::placeholder{color:#B8C0CE}
+.sf-table td.sf-auto{color:#1B3A8C;font-size:.85em}
+.sf-table td.sf-label{text-align:left;padding-left:.35em;font-weight:700}
+.sf-table td.sf-note{font-size:1em;padding:0}
+.sf-note div{writing-mode:vertical-rl;transform:rotate(180deg);margin:0 auto;line-height:1.25;font-size:1.05em;white-space:nowrap}
+.sf-note b{font-size:1.15em}
+.sf-remedial{margin-top:.35em}
+.sf-conducted{margin:0;padding:0 .4em;align-items:center;font-size:.95em}
+.sf-revised{text-align:right;font-style:italic;font-size:.75em;margin-top:.4em}
+/* Printing. The browser prints its own header and footer (date, page title, address, page number)
+   in the page margin. A page with no margin leaves it no room, so they are dropped; the white
+   border around what is printed comes from padding instead.
+   On the Fill Out Form 137 page the sheet prints without the app around it. PrintFormBtn adds what
+   it prints outside the app (.print-only) and marks the body "printing-form", so only that prints. */
+.print-only{display:none}
+@page{margin:0}
+/* The SF10-ES is a long bond form; this asks the printer for that paper */
+@page sf10{size:8.5in 13in;margin:0}
+@media print{
+  body{overflow:visible;background:#fff}
+  .sidebar,.topbar,.no-print{display:none!important}
+  .app-shell,.app-main,.page-wrap{display:block;height:auto;overflow:visible;padding:0}
+  body.printing-form #root{display:none}
+  body.printing-form .print-only{display:block}
+  /* An uploaded scan fills one page without being cropped or stretched */
+  .print-scan{display:block;margin:0 auto;padding:12mm;box-sizing:border-box;max-width:100%;max-height:100vh;object-fit:contain}
+  /* 84em of sheet plus 2 x 2.6em of padding across the 8.5in page */
+  .sf10{page:sf10;font-size:calc(8.5in / 89.2);margin:0;border:none;box-shadow:none}
+  /* A final rating worked out from the quarters is shown as a placeholder; on paper it is a grade like any other */
+  .sf-cell::placeholder{color:#1B3A8C;opacity:1}
+  .sf-in::placeholder{color:transparent}
+  .sf-in:focus,.sf-cell:focus{background:transparent}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}

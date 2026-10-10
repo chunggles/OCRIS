@@ -10,6 +10,7 @@ export const NAV_ITEMS = [
   { section: 'Main' },
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'upload',    label: 'Upload Form 137' },
+  { key: 'fillform',  label: 'Fill Out Form 137' },
   { key: 'records',   label: 'Records' },
   { key: 'search',    label: 'Search' },
   { key: 'analytics', label: 'Grade Analytics' },
@@ -44,7 +45,8 @@ export const SCHOOL_YEARS = Array.from(
 export const CURRENT_SCHOOL_YEAR = SCHOOL_YEARS[0]
 
 export const PERM_MATRIX = [
-  { perm: 'Upload Form 137',     oic: true, admin: true,  teacher: true },
+  { perm: 'Upload Form 137',     oic: true, admin: true,  teacher: 'Own class' },
+  { perm: 'Fill out Form 137',   oic: true, admin: true,  teacher: 'Own class' },
   { perm: 'View records',        oic: true, admin: true,  teacher: 'Own class' },
   { perm: 'Validate OCR fields', oic: true, admin: true,  teacher: true },
   { perm: 'Edit or delete',      oic: true, admin: true,  teacher: false },
@@ -57,5 +59,5 @@ export const PERM_MATRIX = [
 export const AUDIT_BADGES = {
   LOGIN: 'b-blue', UPLOAD: 'b-blue', VALIDATE: 'b-green', EDIT: 'b-amber', DELETE: 'b-rose', DELETE_USER: 'b-rose',
   EDIT_USER: 'b-amber', RESET_PASSWORD: 'b-amber', CHANGE_PASSWORD: 'b-amber',
-  ADD_SECTION: 'b-green', EDIT_SECTION: 'b-amber', DELETE_SECTION: 'b-rose',
+  ENCODE: 'b-blue', ADD_SECTION: 'b-green', EDIT_SECTION: 'b-amber', DELETE_SECTION: 'b-rose',
 }

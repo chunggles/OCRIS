@@ -1,18 +1,15 @@
-import { useCallback, useRef, useState } from 'react'
-import { useApp } from '../../context/AppContext'
-import { GRADE_LEVELS, ROLES, SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
+import { useRef, useState } from 'react'
+import { SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
-import { sectionsAPI, gradeLevelsOf, sectionsOf } from '../../utils/api'
-import { useFetch } from '../../utils/useFetch'
+import { useClassPicker, NO_CLASS } from '../../utils/useClassPicker'
+import { isPdf } from '../../components/ui/ScanPreview'
 import { useObjectUrl } from '../../utils/useObjectUrl'
 import { formatMB, plural } from '../../utils/format'
 
 const DEFAULT_CLASS = { grade: 'Grade 5', section: '', school_year: CURRENT_SCHOOL_YEAR }
-// PDFs can't be read by the OCR engine, so only images are accepted
-const ACCEPTED_TYPES = ['image/jpeg', 'image/png']
+const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
 const MAX_BYTES = 20 * 1024 * 1024
 const MAX_FORMS = 30
-const NO_CLASS = 'Your account has no class assigned yet. Ask the OIC to assign your grade and section.'
 
 const SCAN_GUIDELINES = [
   ['green', 'Yes',  'Scan at 300 DPI minimum for accurate OCR'],
@@ -21,6 +18,7 @@ const SCAN_GUIDELINES = [
   ['green', 'Yes',  'All grade boxes fully visible inside the frame'],
   ['amber', 'Note', 'Handwritten grades will be flagged for review — this is normal'],
   ['amber', 'Note', 'Blank fields stored as N/A, never zero'],
+  ['amber', 'Note', 'For a PDF, only the first page is read — one form per file'],
   ['rose',  'No',   'Phone camera photos — shadows distort OCR'],
   ['rose',  'No',   'Torn or severely water-damaged documents'],
 ]
@@ -30,13 +28,13 @@ let lastRowId = 0
 const newRow = (file, pupil = {}) => ({ id: ++lastRowId, file, last_name: '', first_name: '', lrn: '', ...pupil })
 
 const fileProblem = (file) => {
-  if (!ACCEPTED_TYPES.includes(file.type)) return 'only JPG or PNG images are accepted (export a PDF as an image first)'
+  if (!ACCEPTED_TYPES.includes(file.type)) return 'only JPG, PNG or PDF files are accepted'
   if (file.size > MAX_BYTES) return 'the file must be under 20 MB'
   return null
 }
 
-function validate(rows, section, isTeacher) {
-  if (!section) return isTeacher ? NO_CLASS : 'Please choose a section.'
+function validate(rows, classProblem) {
+  if (classProblem) return classProblem
   if (rows.length === 0) return 'Please choose at least one scanned Form 137 file.'
   const unnamed = rows.filter(r => !r.last_name.trim() || !r.first_name.trim())
   if (unnamed.length) return `Please enter the pupil's name for: ${unnamed.map(r => r.file.name).join(', ')}.`
@@ -51,20 +49,20 @@ function DropZone({ onFiles }) {
       onDragOver={e => e.preventDefault()}
       onDrop={e => { e.preventDefault(); onFiles(e.dataTransfer.files) }}>
       {/* The value is cleared after each pick so the same file can be chosen again */}
-      <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png" multiple hidden
+      <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png,.pdf" multiple hidden
         onChange={e => { onFiles(e.target.files); e.target.value = '' }}/>
       <div className="dropzone-icon">📁</div>
       <div className="dropzone-title" style={{ color: 'var(--blue)' }}>Click to browse or drag and drop</div>
-      <div className="dropzone-sub">You can choose several forms at once — JPG or PNG — 300 DPI recommended — Max 20 MB each</div>
+      <div className="dropzone-sub">You can choose several forms at once — JPG, PNG or PDF — 300 DPI recommended — Max 20 MB each</div>
     </div>
   )
 }
 
 function FormRow({ row, number, onChange, onRemove }) {
-  const preview = useObjectUrl(row.file)
+  const preview = useObjectUrl(isPdf(row.file) ? null : row.file)
   return (
     <div className="queue-item">
-      {preview ? <img src={preview} alt="" className="queue-thumb"/> : <div className="queue-thumb"/>}
+      {preview ? <img src={preview} alt="" className="queue-thumb"/> : <div className="queue-thumb">{isPdf(row.file) && 'PDF'}</div>}
       <div className="queue-body">
         <div className="queue-file">
           <span><strong>{number}. {row.file.name}</strong> — {formatMB(row.file.size)}</span>
@@ -83,7 +81,6 @@ function FormRow({ row, number, onChange, onRemove }) {
 // Step 1: pick the class once, then one or more scanned forms, each with its pupil's name.
 // `initial.queue` restores what was entered when the user comes back to this step.
 export default function StepPupilInfo({ initial = {}, onNext }) {
-  const { user } = useApp()
   const restored = initial.queue || []
   const [cls,   setCls]   = useState(() => {
     const form = restored[0]?.form
@@ -93,23 +90,8 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
     newRow(file, { last_name: form.last_name, first_name: form.first_name, lrn: form.lrn })))
   const [error, setError] = useState('')
 
-  const fetchSections = useCallback(() => sectionsAPI.tree(), [])
-  const { data: sectionTree, loading: sectionsLoading, error: sectionsError } = useFetch(fetchSections)
-
-  // A teacher only sees their own class, so their forms are always filed under it
-  const isTeacher = user?.role === ROLES.TEACHER
-  const ownClass  = isTeacher ? { grade: user.assigned_grade || '', section: user.assigned_section || '' } : null
-
-  // Both dropdowns follow the section tree: the grade levels are its parent nodes, and the section
-  // options are the children of the chosen grade level. A section that isn't one of them counts as not chosen.
-  const gradeLevels  = sectionTree?.length ? gradeLevelsOf(sectionTree) : GRADE_LEVELS
-  const grade        = ownClass ? ownClass.grade : cls.grade
-  const sectionNames = sectionsOf(sectionTree, grade).map(s => s.name)
-  const section      = ownClass ? ownClass.section : sectionNames.includes(cls.section) ? cls.section : ''
-  const sectionPlaceholder = sectionsLoading ? 'Loading...'
-    : sectionsError ? 'Could not load sections'
-    : sectionNames.length === 0 ? `No sections in ${grade}`
-    : 'Select a section'
+  const picker = useClassPicker(cls.grade, cls.section)
+  const { grade, section, sectionNames } = picker
 
   const setClass = (key, value) => setCls(c => ({ ...c, [key]: value }))
   // Sections belong to a grade level, so changing the grade clears the chosen section
@@ -132,7 +114,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
   }
 
   const handleNext = () => {
-    const problem = validate(rows, section, isTeacher)
+    const problem = validate(rows, picker.problem)
     if (problem) { setError(problem); return }
     setError('')
     onNext({
@@ -150,23 +132,23 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
     <div className="g2">
       <div>
         <Card title="Class">
-          {isTeacher && !section && <Notice>{NO_CLASS}</Notice>}
+          {picker.locked && !section && <Notice>{NO_CLASS}</Notice>}
           <div className="form-row-3">
             <FormGroup label="Grade level">
-              {ownClass
+              {picker.locked
                 ? <select className="fld" value={grade} disabled><option>{grade}</option></select>
                 : (
                   <select className="fld" value={grade} onChange={e => handleGrade(e.target.value)}>
-                    {gradeLevels.map(g => <option key={g}>{g}</option>)}
+                    {picker.gradeLevels.map(g => <option key={g}>{g}</option>)}
                   </select>
                 )}
             </FormGroup>
             <FormGroup label="Section *">
-              {ownClass
+              {picker.locked
                 ? <select className="fld" value={section} disabled><option>{section}</option></select>
                 : (
                   <select className="fld" value={section} onChange={e => setClass('section', e.target.value)} disabled={sectionNames.length === 0}>
-                    <option value="">{sectionPlaceholder}</option>
+                    <option value="">{picker.sectionPlaceholder}</option>
                     {sectionNames.map(s => <option key={s}>{s}</option>)}
                   </select>
                 )}
@@ -178,7 +160,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
             </FormGroup>
           </div>
           <div className="hint">
-            {isTeacher ? 'Your forms are filed under your assigned class.' : 'Every form you choose below is filed under this class.'}
+            {picker.locked ? 'Your forms are filed under your assigned class.' : 'Every form you choose below is filed under this class.'}
           </div>
         </Card>
 

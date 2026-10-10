@@ -9,7 +9,9 @@ Every number here is computed from the actual image:
   skew        page rotation found by testing small angles for the sharpest row profile
   content     share of dark pixels (catches blank or very dark/shadowed scans)
 """
-from PIL import Image, ImageFilter, ImageStat
+from PIL import Image, ImageFilter, ImageStat, UnidentifiedImageError
+
+from .pdf import open_scan
 
 FORM_WIDTH_IN = 8.5          # Form 137 is printed on 8.5" × 13" long bond paper
 ANALYSIS_WIDTH = 1000        # images are downscaled to this width before analysis
@@ -163,12 +165,16 @@ GRADERS = [_grade_resolution, _grade_contrast, _grade_brightness, _grade_sharpne
 
 
 def analyze_image(source):
-    """source: a file path or file-like object. Returns per-metric results and an overall verdict."""
+    """
+    source: a file path or file-like object, an image or a PDF. Returns per-metric results and an
+    overall verdict. For a PDF the first page is checked, and `pages` says how many it has.
+    """
     try:
-        img = Image.open(source)
-        img.load()
+        img, pages = open_scan(source)
+    except UnidentifiedImageError as e:
+        return {'error': str(e), 'overall_ok': False, 'metrics': []}
     except Exception:
-        return {'error': 'Quality check is only available for JPG and PNG images.', 'overall_ok': False, 'metrics': []}
+        return {'error': 'The quality check could not read this file.', 'overall_ok': False, 'metrics': []}
 
     grey = img.convert('L')
     metrics = [grade(img, grey) for grade in GRADERS]
@@ -181,4 +187,5 @@ def analyze_image(source):
         'overall_ok': worst != POOR,
         'width': img.width,
         'height': img.height,
+        'pages': pages,
     }
