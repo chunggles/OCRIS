@@ -20,7 +20,41 @@ flowchart TD
     J --> K[(Saved record)]
 ```
 
-Supported input: one JPG or PNG image per upload, up to 20 MB. PDFs are not supported.
+Supported input: one JPG, PNG or PDF file per upload, up to 20 MB. A PDF's first page is rendered to an image at 300 DPI (`ocr/pdf.py`, using `pypdfium2`) and then goes through the same steps as an image; its other pages are not read.
+
+Two form layouts are read:
+
+| Layout | How its grade tables are found |
+|---|---|
+| Form 137-A (and other single-column forms) | One table column; year blocks are stacked down the page and named by the level after each subject ("English I", "English II"). |
+| SF10-ES (elementary, formerly Form 137) | Two tables side by side, four year blocks in all. The page is split at the blank strip between the tables (`find_gutter` in `ocr/table.py`) and each half is read as its own table. A block is named after its "Classified as Grade" line ("Filipino Grade 4"). If those grades do not run in increasing order, one was misread, and all blocks fall back to "Block 1" to "Block 4". Blocks and learning-area rows with no grades are left out, and so is the Remedial Classes table. |
+
+The learner's name on an SF10-ES is read from the "LAST NAME: … FIRST NAME: …" line.
+
+SF10-ES accuracy was measured on filled-in copies of the form (Revised 2025 front page), 130 grades each. The first group is a PDF filled in on a computer and rougher copies made from it; the second is copies of the blank form filled in for testing, and the app's own Fill Out Form 137 sheet printed to PDF.
+
+| Copy | Correct and auto-approved | Flagged for review | Wrong and auto-approved |
+|---|---|---|---|
+| PDF filled in on a computer | 105 | 25 | 0 |
+| ... as a 200 DPI scan, tilted 0.9°, JPEG | 126 | 4 | 0 |
+| ... as a 150 DPI scan, tilted 1.4° | 127 | 3 | 0 |
+| ... as a 180 DPI image with no DPI information, tilted 2.2° | 125 | 5 | 0 |
+| ... faded and grainy, 200 DPI | 86 | 24 | 0 |
+| Clean typed copy | 124 | 6 | 0 |
+| 200 DPI, tilted 0.8°, JPEG | 128 | 2 | 0 |
+| Handwriting-style font | 31 | 99 | 0 |
+| App's printed sheet | 123 | 7 | 0 |
+
+These figures are with the 90% confidence rule (`OCR_CONFIDENCE_THRESHOLD=90`), measured on 2026-10-10. Nearly every flagged grade on the clean copies already showed the right value and was held back only because its confidence was 90% or lower. On the faded copy, 4 of the 26 subject rows (20 grades) were not found at all: the grain broke up their table lines. On the Form 137-A sample, 22 of 90 grades are auto-approved under this rule; under the earlier rule (agreement with a confidence floor of 50) it was 76, also with none wrong.
+
+These are generated copies, not scans of paper that real pens and scanners have touched; re-check on real forms.
+
+What keeps hard scans readable:
+
+- **PDFs filled in on a computer.** Entries typed into a PDF are kept apart from the printed page, as form fields or as text boxes laid over it. Both are drawn when the page is rendered (`ocr/pdf.py`); otherwise the page comes out as the blank form.
+- **Grainy or faded scans.** When fewer than 85% of a table's grades are auto-approved, a lightly smoothed copy of the page is read as well and the better result is kept (`smoothed()` in `ocr/preprocess.py`). This roughly doubles the reading time for those scans only.
+- **Learning areas that can't be read.** Inside a grade table, a first cell that matches no learning area is read again at two other sizes, then matched more loosely. If it still matches nothing and the row has grades, the row is kept as "Unread learning area" and its grades are shown, instead of being left out.
+- **Learner details.** The page's words are read twice, binarised and as plain grey; each field is taken from the better reading. A section name is corrected to the closest one on the Sections page.
 
 ## 2. Image quality check
 
@@ -96,7 +130,7 @@ A grade is **auto-approved** (`status: ok`) only if all of these hold:
 1. at least 3 of the readings give the same grade;
 2. that grade is between 60 and 100;
 3. no reading gives a different valid grade;
-4. the mean Tesseract confidence of the agreeing readings is at least 50.
+4. the mean Tesseract confidence of the agreeing readings is above 90%. This is the `OCR_CONFIDENCE_THRESHOLD` setting (in `backend/.env`); lowering it approves more grades automatically and leaves fewer for review, at more risk of a wrong one.
 
 Otherwise:
 
@@ -162,7 +196,8 @@ The summary returned with an upload counts `total`, `auto_approved`, `flagged` a
 
 | Situation | Message |
 |---|---|
-| File is not an image | "This file couldn't be read as an image. Upload the scan as a JPG or PNG." |
+| File is not an image or a PDF | "This file couldn't be read. Upload the scan as a JPG, PNG or PDF." |
+| PDF is damaged or password-protected | "This PDF couldn't be opened. It may be damaged or password-protected." |
 | Tesseract executable missing | "The OCR engine (Tesseract) was not found on the server. Set TESSERACT_CMD in the backend .env." |
 | Python OCR libraries missing | "The OCR engine is not installed on the server." |
 | No grade rows found | "No grade rows were found on this scan. Check that the whole grade table is visible and try rescanning." |

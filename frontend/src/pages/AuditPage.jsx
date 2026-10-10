@@ -9,6 +9,8 @@ import { formatDateTime } from '../utils/format'
 const describe = (d = {}) => [
   d.pupil && `Pupil: ${d.pupil}`,
   d.grade && `Grade: ${d.grade}`,
+  d.section && `Section: ${d.section}`,
+  d.was && `Was: ${d.was}`,
   d.new_user && `New user: ${d.new_user} (${d.role})`,
   d.deleted_user && `Deleted user: ${d.deleted_user} (${d.role})`,
   d.target_user && `User: ${d.target_user}`,

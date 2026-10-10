@@ -46,17 +46,21 @@ The token is returned by `POST /auth/login/`.
 | GET | `/auth/me/` | Any | Current user |
 | POST | `/auth/change-password/` | Any | Change your own password |
 | GET | `/records/` | Any (teachers: own class) | List records |
+| POST | `/records/create/` | Any (teachers: own class) | Save a record typed into the on-screen Form 137 |
 | GET | `/records/search/` | Any (teachers: own class) | Search records |
 | GET | `/records/options/` | Any (teachers: own class) | Values for the filter dropdowns |
 | GET | `/records/<record_id>/` | Any (teachers: own class) | One record |
-| PUT, PATCH | `/records/<record_id>/update/` | OIC, Admin | Edit a record |
+| PUT, PATCH | `/records/<record_id>/update/` | OIC, Admin; teachers: typed forms of own class | Edit a record |
 | DELETE | `/records/<record_id>/delete/` | OIC, Admin | Delete a record |
 | POST | `/ocr/quality/` | Any | Check image quality |
-| POST | `/ocr/upload/` | Any | Upload a scan and run OCR |
-| POST | `/ocr/validate/` | Any | Save a validated record |
+| POST | `/ocr/upload/` | Any (teachers: own class) | Upload a scan and run OCR |
+| POST | `/ocr/validate/` | Any (teachers: own class) | Save a validated record |
 | GET | `/ocr/scans/<scan_id>/file/` | Any (teachers: own class) | Download the original scan |
 | GET | `/ocr/history/` | Any (teachers: own class) | List scans |
 | GET | `/analytics/` | Any (teachers: own class) | Grade analytics |
+| GET | `/sections/` | Any | The section tree (grade levels and their sections) |
+| POST | `/sections/create/` | OIC, Admin | Add a section |
+| PATCH, DELETE | `/sections/<section_id>/` | OIC, Admin | Edit or delete a section |
 | GET | `/users/` | OIC, Admin | List users |
 | POST | `/users/create/` | OIC | Create a user |
 | GET, PATCH, DELETE | `/users/<id>/` | OIC | View, edit or delete a user |
@@ -122,15 +126,21 @@ For a teacher, the grade and section are replaced by the teacher's assigned clas
 
 ### GET `/records/search/?q=<text>`
 
-Case-insensitive search in pupil name, LRN, section and grade level. The text is matched literally; characters such as `(` or `*` have no special meaning. Returns at most 50 records. Teachers only get results from their assigned class.
+Finds records whose pupil name, LRN, grade level, section or school year contains the text, or that have a subject whose name contains it, or whose scanned form has it written anywhere on the page. The text is matched literally, ignoring case.
 
-Response `200`:
+Optional filters: `grade`, `section`, `school_year`. A teacher is always limited to their own class.
 
 ```json
-{ "query": "santos", "count": 2, "results": [ ... ] }
+{
+  "query": "santos",
+  "count": 50,
+  "total": 128,
+  "limit": 50,
+  "results": [ { "record_id": "REC-2026-7C1E4A90", "pupil_name": "Santos, Maria", "matched_in": ["name"] } ]
+}
 ```
 
-Response `400` if `q` is missing.
+`count` is how many records are returned and `total` how many match; at most `limit` are returned, ordered by pupil name. `matched_in` lists where each record matched: `name`, `LRN`, `grade level`, `section`, `school year`, `subject`, `scanned text`. Response `400` if `q` is missing.
 
 ### GET `/records/<record_id>/`
 
@@ -144,15 +154,45 @@ The values that saved records actually use, for filter dropdowns. Teachers get t
 { "grade_levels": ["Grade 5", "Grade 6"], "sections": ["Orchid", "Sampaguita"], "school_years": ["2024-2025", "2023-2024"] }
 ```
 
+### POST `/records/create/`
+
+Saves a record typed into the on-screen SF10-ES. No scan is involved, so the record's `scan_id` is empty.
+
+```json
+{
+  "pupil_name": "Dela Cruz, Janelle Mae",
+  "lrn": "104567890123",
+  "grade_level": "Grade 4",
+  "section": "Athena",
+  "school_year": "2025-2026",
+  "class_adviser": "Gloria D. Ramos",
+  "grades": { "English": { "Q1": "88", "Q2": "90", "Q3": "92", "Q4": "94", "final": "91" } },
+  "details": {
+    "name_ext": "", "middle_name": "Antonio", "birthdate": "07/28/2016", "sex": "F",
+    "eligibility": { "kinder_progress_report": true, "school_name": "…" },
+    "blocks": [ { "grade_level": "Grade 1", "section": "Rizal", "school_year": "2022-2023", "rows": [ { "subject": "Language", "Q1": "86" } ], "remedial": {} } ]
+  }
+}
+```
+
+`pupil_name`, `grade_level`, `section`, `school_year` and at least one subject in `grades` are required. Each grade is a number from 0 to 100 or left out. The general average and remarks are calculated by the server. A teacher may only send their assigned class.
+
+The top-level class and `grades` are those of the last year block that has grades on the sheet. `details` is optional and holds the rest of the sheet, including all four year blocks as typed, so the form can be shown again. Only the keys shown are kept; text is cut to 100 characters, lists and objects to 40 entries.
+
+Response `201` with the record, `400` for invalid input, `403` for a teacher filing under another class. Writes an `ENCODE` audit entry.
+
 ### PUT or PATCH `/records/<record_id>/update/`
 
-Access: OIC, Admin. The body holds the fields to change. Only these are accepted; anything else is ignored.
+Access: OIC and Admin for any record. A teacher may edit only a typed-in form (a record with no `scan_id`) of their own class, and cannot change its grade level or section to another class; anything else gets `403`.
+
+The body holds the fields to change. Only these are accepted; anything else is ignored.
 
 | Field | Rule |
 |---|---|
 | `pupil_name`, `grade_level`, `section`, `school_year` | Text; cannot be blank |
 | `lrn`, `class_adviser` | Text; may be blank |
-| `grades` | The whole grade sheet: `{subject: {Q1, Q2, Q3, Q4, final}}`. A missing or empty value is stored as `N/A`. |
+| `grades` | The whole grade sheet: `{subject: {Q1, Q2, Q3, Q4, final}}`. A missing or empty value is stored as `N/A`. On a typed-in form, each grade must be a number from 0 to 100 and at least one subject is required. |
+| `details` | The whole details object, as in `POST /records/create/`. |
 
 When `grades` is sent, `general_average` and `remarks` are recalculated; they cannot be set directly. Response `200`: the updated record. Response `400` if nothing valid was sent or a value breaks a rule. Writes an `EDIT` audit entry.
 
@@ -199,9 +239,11 @@ Response `400` if no file is sent.
 
 Saves the image, runs OCR and creates a scan. Body: `multipart/form-data`.
 
+A teacher may only send their assigned `grade_level` and `section` (section case is ignored). Anything else gets `403` here and on `/ocr/validate/`, before the file is stored.
+
 | Field | Required | Meaning |
 |---|---|---|
-| `file` | Yes | JPG or PNG, up to 20 MB |
+| `file` | Yes | JPG, PNG or PDF, up to 20 MB. For a PDF, page 1 is read. |
 | `pupil_name` | No | Stored on the scan |
 | `grade_level` | No | Stored on the scan |
 | `section` | No | Stored on the scan |
@@ -292,33 +334,34 @@ Paginated list of scans, without their `ocr_fields`. Teachers get the scans of t
 
 ### GET `/analytics/`
 
-| Query parameter | Meaning |
-|---|---|
-| `school_year` | Limit to one school year |
-| `grade` | Limit to one grade level |
-
-Response `200`:
+Descriptive figures for the saved records. Optional filters: `school_year`, `grade`, `section`. A teacher is always limited to their own class. Blank and unreadable grades are left out of every figure.
 
 ```json
 {
-  "total_records": 42,
-  "subject_means": { "English I": 86.2, "Mathematics I": 73.9 },
-  "pass_rates": { "Grade 5": 92.3, "Grade 6": 88.0 },
-  "intervention_flags": [
-    { "subject": "Mathematics I", "mean": 73.9, "grade_level": "All" }
+  "total_records": 40,
+  "subject_means": { "Mathematics": 74.0, "English": 84.0 },
+  "pass_rates": { "Grade 6": 95.0 },
+  "subjects": [
+    {
+      "subject": "Mathematics",
+      "means": { "Q1": 76.0, "Q2": 74.0, "Q3": 73.0, "Q4": 72.0, "final": 74.0 },
+      "graded": 40, "passed": 23, "failed": 17, "pass_rate": 57.5
+    }
   ],
+  "period_means": { "Q1": 83.5, "Q2": 84.0, "Q3": 84.4, "Q4": 85.5, "final": 84.5 },
+  "intervention_flags": [ { "subject": "Mathematics", "mean": 74.0, "grade_level": "All" } ],
   "pending_scans": 2
 }
 ```
 
-| Key | How it is computed |
+| Field | Meaning |
 |---|---|
-| `subject_means` | Mean of numeric Final grades per subject, one decimal place. Blank grades are excluded. |
-| `pass_rates` | Per grade level, the percentage of records whose general average is at least 75 |
-| `intervention_flags` | Subjects whose mean is below 75. `grade_level` is the `grade` filter, or `All`. |
-| `pending_scans` | Uploads that were read but never saved as a record (not affected by the filters) |
-
-For a teacher, everything is limited to their own class and the `grade` filter cannot widen it.
+| `subject_means` | Mean final rating per subject |
+| `pass_rates` | Per grade level, the share of records whose general average is 75 or higher |
+| `subjects` | Per subject: its mean for each grading period and the final rating, how many final ratings there are (`graded`), and how many pass and fail. The subjects with the most failing final ratings come first. |
+| `period_means` | Mean over every subject for each grading period |
+| `intervention_flags` | Subjects whose mean final rating is below 75 |
+| `pending_scans` | Scans uploaded but never saved as a record |
 
 ---
 
@@ -392,6 +435,58 @@ Access: OIC. Permanently deletes the account and its token. Records, scans and a
 | `404` | No such user |
 
 Writes a `DELETE_USER` audit entry.
+
+---
+
+## Sections
+
+Sections are a tree, managed on the Sections page: each grade level is a parent node and its sections are the child nodes. It is stored in the `grade_levels` collection, one document per grade level with its sections in a `sections` array. Records and teacher accounts store their section as plain text, so editing or deleting a section here does not change them.
+
+### GET `/sections/`
+
+Access: any. Returns the whole tree: all six grade levels in order, including those with no sections, each with its sections ordered by name.
+
+```json
+[
+  {
+    "grade_level": "Grade 1",
+    "sections": [
+      { "section_id": "SEC-3F9A1C2B", "name": "Sampaguita", "created_at": "2026-10-05T02:10:00Z", "updated_at": "2026-10-05T02:10:00Z" }
+    ]
+  },
+  { "grade_level": "Grade 2", "sections": [] }
+]
+```
+
+The add and edit endpoints below return a single section, with the grade level it sits under:
+
+```json
+{
+  "section_id": "SEC-3F9A1C2B",
+  "name": "Sampaguita",
+  "grade_level": "Grade 1",
+  "created_at": "2026-10-05T02:10:00Z",
+  "updated_at": "2026-10-05T02:10:00Z"
+}
+```
+
+### POST `/sections/create/`
+
+Access: OIC, Admin.
+
+```json
+{ "name": "Sampaguita", "grade_level": "Grade 1" }
+```
+
+`name` is required, at most 50 characters. `grade_level` is `Grade 1` to `Grade 6`. Response `201` with the section object, or `400` if a field is invalid or that grade level already has a section with the same name (case is ignored). Writes an `ADD_SECTION` audit entry.
+
+### PATCH `/sections/<section_id>/`
+
+Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Changing `grade_level` moves the section under that grade level. Returns the updated section object. Writes an `EDIT_SECTION` audit entry.
+
+### DELETE `/sections/<section_id>/`
+
+Access: OIC, Admin. Response `204`, or `404` if there is no such section. Writes a `DELETE_SECTION` audit entry.
 
 ---
 

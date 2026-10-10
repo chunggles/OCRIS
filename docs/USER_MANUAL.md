@@ -52,10 +52,12 @@ Change the temporary password you were given the first time you sign in. If you 
 |---|---|
 | Dashboard | Overview and recent uploads |
 | Upload Form 137 | Digitize a scanned form |
+| Fill Out Form 137 | Type a pupil's record onto an on-screen form, with no scan |
 | Records | List of all saved records |
 | Search | Find a pupil's record |
 | Grade Analytics | Class means, pass rates, intervention flags |
 | Scan History | Every scan that has been uploaded |
+| Sections | The sections in each grade level (OIC and Admin Staff) |
 | User Management | Accounts (OIC; Admin Staff can view) |
 | Audit Log | Who did what, and when (OIC and Admin Staff) |
 
@@ -100,23 +102,24 @@ Click **Upload Form 137** in the menu. The upload has six steps, shown as tabs a
 | Do | Use grayscale or black-and-white mode |
 | Do | Keep the paper flat, with no folds |
 | Do | Make sure the whole grade table is inside the scan |
-| Do | Save as **JPG or PNG** |
+| Do | Scan the **whole page** of an SF10-ES, straight; its four grade tables are read together |
+| Do | Save as **JPG, PNG or PDF** |
 | Avoid | Phone camera photos; shadows cause misreads |
 | Avoid | Torn or badly water-damaged forms |
-| Not accepted | PDF files. Export the page as an image first. |
+| Note | For a PDF, only the **first page** is read. Save each form as its own file. |
 
-Each upload is one image, up to 20 MB.
+Each form is one image, up to 20 MB. You can upload up to 30 forms of the same class at a time.
 
 ### Step 1: Upload
 
-1. Type the pupil's **Last name** and **First name**.
-2. Choose the **Grade level** and **School year**.
-3. Type the **Section**.
-4. Type the **LRN** if you have it (optional).
-5. Click the upload box to choose the scan, or drag the file onto it. A preview appears.
-6. Click **Next: Check image quality**.
+1. Choose the **Grade level**, **Section** and **School year**. The sections listed are the ones the OIC or Admin Staff set up for that grade on the Sections page. Teachers do not choose: their forms are always filed under their assigned class.
+2. Click the upload box and choose the scans, or drag the files onto it. You can choose several at once. Each one appears in a list with a small preview.
+3. For each form in the list, type the pupil's **Last name** and **First name**, and the **LRN** if you have it (optional). Click **Remove** to take a form off the list.
+4. Click **Next**.
 
 Type these details carefully. **The saved record uses what you type here**, not what the system reads from the scan.
+
+With more than one form, steps 2 to 6 run for the first form, then the next, in the order of the list. A bar under the step tabs shows which form you are on, for example "Form 2 of 5". To drop a form partway, go back to step 1 and remove it.
 
 ### Step 2: Quality
 
@@ -135,7 +138,8 @@ If you see an error instead:
 | Message | What to do |
 |---|---|
 | "No grade rows were found on this scan…" | The grade table is cut off, or the wrong page was scanned. Rescan with the whole table visible. |
-| "This file couldn't be read as an image…" | The file is not a JPG or PNG. Convert it and try again. |
+| "This file couldn't be read…" | The file is not a JPG, PNG or PDF. Convert it and try again. |
+| "This PDF couldn't be opened…" | The PDF is damaged or has a password. Save it again without a password, or scan the form again. |
 | "OCR failed on this scan. Try rescanning it." | Rescan and try again. If it keeps happening, report it. |
 | "The OCR engine … was not found on the server." | Report this to the person who maintains OCRIS. |
 
@@ -194,6 +198,8 @@ To change something, click **Back and edit**.
 
 You will see the new **Record ID**, the **General average** and the **Remarks**. From here you can upload another form, view all records, or view analytics.
 
+If you chose several forms, click **Next form** to continue with the next one. **Stop and view records** leaves the remaining forms unsaved.
+
 ### How the remarks are decided
 
 | Remarks | Meaning |
@@ -203,6 +209,25 @@ You will see the new **Record ID**, the **General average** and the **Remarks**.
 | **Incomplete** | The result cannot be decided: there are no Final grades, or a Final grade was saved as something that is not a number |
 
 The **general average** is the average of all Final grades on the form. Blank (N/A) grades are left out; they are never counted as zero.
+
+### Typing a form instead of scanning it
+
+Click **Fill Out Form 137** in the menu when there is no paper form to scan. The page shows a blank **SF10-ES** (Learner Permanent Academic Record for Elementary School, formerly Form 137), laid out like the printed front page, and you type on it.
+
+1. Fill in the **Learner's Personal Information**: last name and first name are required; the rest is optional.
+2. Fill in the **Eligibility for Elementary School Enrollment** section if you have it.
+3. In the **Scholastic Record**, use the block for the school year you are recording. The form has four blocks; the learning areas are already printed in each, and you can change them or add more in the empty rows.
+4. For each block you put grades in, choose **Classified as Grade**, **Section** and **School Year**. The sections offered are the ones set up for that grade on the Sections page.
+5. Type the grades for each quarter. Leave a box empty if there is no grade. The **Final Rating** fills itself in as the average of the four quarters, rounded to a whole number; type over it if the form shows a different one. **General Average** and, in the last block, **Remarks** are worked out for you.
+6. Click **Save record**.
+
+A grade that is not a number from 0 to 100 turns red and must be corrected before saving.
+
+**How the form is saved.** One form is saved as one record. The record is filed under the class of the **last block that has grades**, and its grades and general average are that block's. The other blocks are kept with the record, and come back when the form is opened or printed, but they are not counted in Records or Grade Analytics. Teachers can only save a form whose last block with grades is their own class.
+
+**Editing a typed form.** After saving, the form stays open: change anything and click **Save changes**. To edit one later, open it from Records and click **Edit on Form 137**. Teachers can edit the typed forms of their own class. Scanned records can only be corrected by the OIC or Admin Staff, from Record Detail.
+
+**Printing and scanning it back.** **Print** prints the form on its own, sized for **long bond paper (8.5 × 13 in)**. In the print window keep the scale at 100% and choose that paper size if it is not already selected. A form printed this way can be scanned and uploaded like any other SF10-ES.
 
 ## 6. Records
 
@@ -231,6 +256,15 @@ Opened by clicking **View** on a record.
 
 **Download original form** saves the scanned image. **Back to Records** returns to the list.
 
+**Printing.** The **Print** button is on Record Detail and on each row of the Records list and the Search results. One click opens your browser's print window; choose the printer and confirm.
+
+| Record | What is printed |
+|---|---|
+| Scanned (uploaded) | The scanned image that was uploaded, fitted to one page |
+| Typed in on Fill Out Form 137 | The record laid out as a Form 137 sheet |
+
+If the uploaded file is no longer on the server, a message says so and nothing is printed.
+
 ### Correcting a record (OIC and Admin Staff)
 
 1. Click **Edit record**.
@@ -241,26 +275,40 @@ Click **Cancel** to leave the record as it was.
 
 ## 8. Search
 
-1. Type a pupil's name, LRN, grade level or section. Part of a name is enough.
-2. Click **Search**, or press Enter.
+1. Type what you are looking for. Part of a word is enough.
+2. To look in one class or year only, choose a grade, section or school year under **Only in**.
+3. Click **Search**, or press Enter.
 
-Up to 50 matching records are shown, with the matching part of the name in bold. Click **View** to open a record. Teachers get results from their own class only.
+A record is found when your text appears in any of these:
+
+| Found in | Example |
+|---|---|
+| name | `santos` |
+| LRN | `1045678` |
+| grade level, section, school year | `grade 4`, `athena`, `2024` |
+| subject | `mapeh` finds every record that has a MAPEH grade |
+| scanned text | words written anywhere on the scanned form, such as a previous school |
+
+The **Found in** column says where each record matched. Up to 50 records are shown. If more match, the page says how many and asks you to narrow the search. Click **View** to open a record. Teachers get results from their own class only.
 
 ## 9. Grade Analytics
 
-Summaries calculated from all saved records. Choose a **School year** or **Grade level** to narrow them.
+Charts and figures calculated from the saved records. Choose a **School year**, **Grade level** or **Section** at the top to narrow everything on the page. Blank and unreadable grades are left out of every figure.
 
 | Item | Meaning |
 |---|---|
 | Records analysed | Number of records included |
-| School-wide average | Average of the subject means |
-| Intervention flags | Number of subjects with a mean below 75 |
-| Overall pass rate | Average of the pass rates across grade levels |
-| Class mean by subject | Average Final grade per subject. Blue: 85 and above. Amber: 75 to 84. Red: below 75. |
-| Pass rate by grade level | Share of pupils whose general average is 75 or higher. Green: 90% and above. Amber: 80 to 89%. Red: below 80%. |
-| Intervention flags | Each subject whose mean is below 75, as a prompt for remedial action |
+| Mean final rating | Average of every final rating |
+| Final ratings that pass | Share of final ratings that are 75 or higher |
+| Failing final ratings | Number of final ratings below 75 |
+| Class mean by subject | Bar chart of the average final rating per subject, highest first |
+| Trend across grading periods | Line chart of the average grade in each of the four quarters. The blue line is the average over all subjects; choose a subject at the top right to follow that subject, with the others in grey behind it. |
+| Pass rate by subject | Bar chart of the share of final ratings at 75 or higher, lowest first |
+| Pass rate by grade level | Share of records whose general average is 75 or higher |
+| Subjects by grading period | Table of every subject's average per quarter and final rating, its pass rate, and how many final ratings fail. The subjects with the most failing ratings are at the top. |
+| Intervention flags | Each subject whose class mean is below 75, as a prompt for remedial action |
 
-Blank (N/A) grades are excluded.
+Point at a bar or a line to see its exact value.
 
 ## 10. Scan History
 
@@ -321,6 +369,7 @@ For OIC and Admin Staff. A list of actions, newest first, with who did each one 
 | LOGIN | Someone signed in |
 | UPLOAD | A scan was uploaded and read |
 | VALIDATE | A record was saved |
+| ENCODE | A record was typed in on the Fill Out Form 137 page |
 | EDIT | A record was changed |
 | DELETE | A record was deleted |
 | DOWNLOAD | An original scan was downloaded |
@@ -329,6 +378,9 @@ For OIC and Admin Staff. A list of actions, newest first, with who did each one 
 | EDIT_USER | An account was changed |
 | RESET_PASSWORD | The OIC set a new password for a user |
 | CHANGE_PASSWORD | A user changed their own password |
+| ADD_SECTION | A section was added |
+| EDIT_SECTION | A section was renamed or moved to another grade level |
+| DELETE_SECTION | A section was deleted |
 
 ## 13. Common questions and problems
 

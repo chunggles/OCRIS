@@ -66,6 +66,7 @@ export const authAPI = {
 export const recordsAPI = {
   list:    (params = {})   => request(`/records/?${qs(params)}`),
   options: ()              => request('/records/options/'),
+  create:  (data)          => request('/records/create/', withBody('POST', data)),
   get:    (id)             => request(`/records/${id}/`),
   search: (q, params = {}) => request(`/records/search/?${qs({ q, ...params })}`),
   update: (id, data)       => request(`/records/${id}/update/`, withBody('PATCH', data)),
@@ -87,6 +88,12 @@ export const ocrAPI = {
   upload:       (file, pupilInfo) => postFile('/ocr/upload/', file, pupilInfo),
   validate: (payload)  => request('/ocr/validate/', withBody('POST', payload)),
   history:  (page = 1) => request(`/ocr/history/?${qs({ page })}`),
+  // The original uploaded file as a Blob, for showing or printing it in the page
+  scanBlob: async (scanId) => {
+    const res = await send(`/ocr/scans/${encodeURIComponent(scanId)}/file/`)
+    if (!res.ok) throw { status: res.status, data: await res.json().catch(() => ({})) }
+    return res.blob()
+  },
   downloadFile: async (scanId, fallbackName = 'form137') => {
     const res = await send(`/ocr/scans/${encodeURIComponent(scanId)}/file/`)
     if (!res.ok) throw { status: res.status, data: await res.json().catch(() => ({})) }
@@ -105,6 +112,19 @@ export const usersAPI = {
   update: (id, data) => request(`/users/${id}/`, withBody('PATCH', data)),
   delete: (id)       => request(`/users/${id}/`, { method: 'DELETE' }),
 }
+
+// Sections are a tree: tree() returns [{ grade_level, sections: [{ section_id, name }] }]
+export const sectionsAPI = {
+  tree:   ()         => request('/sections/'),
+  create: (data)     => request('/sections/create/', withBody('POST', data)),
+  update: (id, data) => request(`/sections/${encodeURIComponent(id)}/`, withBody('PATCH', data)),
+  delete: (id)       => request(`/sections/${encodeURIComponent(id)}/`, { method: 'DELETE' }),
+}
+
+// Reading the tree: the parent nodes (grade levels), and the child nodes (sections) of one parent
+const nodesOf = (tree) => (Array.isArray(tree) ? tree : [])
+export const gradeLevelsOf = (tree) => nodesOf(tree).map(node => node.grade_level)
+export const sectionsOf = (tree, gradeLevel) => nodesOf(tree).find(node => node.grade_level === gradeLevel)?.sections || []
 
 export const auditAPI = {
   list: (page = 1) => request(`/audit/?${qs({ page })}`),

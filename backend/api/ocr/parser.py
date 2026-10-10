@@ -22,6 +22,16 @@ OCR_FIXES = {
 # short aliases like "TLE"/"AP" from matching inside other words; "Edu\w*" tolerates
 # typos on real forms (e.g. "Technology and Livelihood Eduation").
 SUBJECT_ALIASES = [(re.compile(pattern, re.IGNORECASE), name) for pattern, name in [
+    # Learning areas of the SF10-ES. The longer names come first: "Arabic Language" must not
+    # match as "Language", nor "Physical Education & Health" as something shorter.
+    (r'\bArabic\s+Language\b',                                            'Arabic Language'),
+    (r'\bIslamic\s+Values(?:\s+Edu\w*)?\b',                               'Islamic Values Education'),
+    (r'\bReading\s+and\s+Literacy\b',                                     'Reading and Literacy'),
+    (r'\bPhysical\s+Edu\w*(?:\s*(?:&|and)\s*Health)?\b',                  'Physical Education & Health'),
+    (r'\bMusic\s*(?:&|and)\s*Arts?\b',                                    'Music & Arts'),
+    (r'\bGMRC\b|\bGood\s+Manners\b',                                      'GMRC'),
+    (r'\bMakabansa\b',                                                    'Makabansa'),
+    (r'\bMother\s+Tongue\b',                                              'Mother Tongue'),
     (r'\bFilipino\b',                                                     'Filipino'),
     (r'\bEnglish\b',                                                      'English'),
     (r'\bMath(?:ematics)?\b',                                             'Mathematics'),
@@ -31,6 +41,7 @@ SUBJECT_ALIASES = [(re.compile(pattern, re.IGNORECASE), name) for pattern, name 
     (r'\bTechnology\s+and\s+Livelihood(?:\s+Edu\w*)?\b|\bTLE\b|\bEPP\b',  'EPP / TLE'),
     (r'\bMAPEH\b',                                                        'MAPEH'),
     (r'\bMAKABAYAN\b',                                                    'MAKABAYAN'),
+    (r'\bLanguage\b',                                                     'Language'),
 ]]
 
 GRADE_COLUMNS = ('Q1', 'Q2', 'Q3', 'Q4', 'Final')

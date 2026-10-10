@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import analytics, audit, auth, ocr, records, users
+from .views import analytics, audit, auth, ocr, records, sections, users
 
 urlpatterns = [
     # Auth
@@ -9,8 +9,9 @@ urlpatterns = [
     path('auth/me/',     auth.me_view,     name='me'),
     path('auth/change-password/', auth.change_password_view, name='change-password'),
 
-    # Records ("search" and "options" must come before the <record_id> routes)
+    # Records ("create", "search" and "options" must come before the <record_id> routes)
     path('records/',                        records.records_list,    name='records-list'),
+    path('records/create/',                 records.record_create,   name='record-create'),
     path('records/search/',                 records.records_search,  name='records-search'),
     path('records/options/',                records.records_options, name='records-options'),
     path('records/<str:record_id>/',        records.record_detail,  name='record-detail'),
@@ -26,6 +27,11 @@ urlpatterns = [
 
     # Analytics
     path('analytics/', analytics.analytics_dashboard, name='analytics'),
+
+    # Sections ("create" must come before the <section_id> route)
+    path('sections/',                  sections.sections_list,   name='sections-list'),
+    path('sections/create/',           sections.sections_create, name='sections-create'),
+    path('sections/<str:section_id>/', sections.section_detail,  name='section-detail'),
 
     # Users & audit
     path('users/',               users.users_list,   name='users-list'),

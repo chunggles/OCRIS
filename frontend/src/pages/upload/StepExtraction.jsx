@@ -1,5 +1,5 @@
 import { Card, Btn, Badge, ConfBar, Alert } from '../../components/ui/index'
-import { isNA, NA } from '../../utils/format'
+import { isNA, NA, FOR_VERIFICATION } from '../../utils/format'
 import { roughlyEqual } from '../../utils/compare'
 import { pupilName, SummaryTiles } from './shared'
 
@@ -35,7 +35,7 @@ function OcrField({ field: f }) {
   const status = isNull ? 'null' : f.status
   // Approval comes from the OCR's agreement check, so colour by status rather than raw confidence
   const badgeType = status === 'ok' ? 'b-green' : status === 'warn' ? 'b-amber' : 'b-grey'
-  const badgeText = isNull ? 'Blank' : f.conf > 0 ? `${f.conf}%` : 'Unreadable'
+  const badgeText = isNull ? 'For verification' : f.conf > 0 ? `${f.conf}%` : 'Unreadable'
   return (
     <div className={`ocr-field ${status}`}>
       <div className="ocr-lbl">{f.field}<Badge type={badgeType}>{badgeText}</Badge></div>
@@ -67,7 +67,7 @@ export default function StepExtraction({ data, onNext, onBack }) {
       <SummaryTiles tiles={[
         { value: summary.auto_approved,       label: 'Auto-approved',          color: 'green' },
         { value: summary.flagged,             label: 'Flagged — needs review', color: 'amber' },
-        { value: summary.null_count,          label: 'Blank — stored as N/A',  color: 'grey' },
+        { value: summary.null_count,          label: 'Blank — ' + FOR_VERIFICATION, color: 'grey' },
         { value: `${summary.overall_conf}%`,  label: 'Overall confidence',     color: 'blue' },
       ]}/>
       <Card title={`Extracted fields — ${pupilName(form)} / ${form.grade} / ${form.school_year}`}>

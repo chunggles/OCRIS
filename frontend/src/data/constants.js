@@ -10,11 +10,13 @@ export const NAV_ITEMS = [
   { section: 'Main' },
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'upload',    label: 'Upload Form 137' },
+  { key: 'fillform',  label: 'Fill Out Form 137' },
   { key: 'records',   label: 'Records' },
   { key: 'search',    label: 'Search' },
   { key: 'analytics', label: 'Grade Analytics' },
   { section: 'Admin' },
   { key: 'history',   label: 'Scan History' },
+  { key: 'sections',  label: 'Sections',        roles: STAFF },
   { key: 'users',     label: 'User Management', roles: STAFF },
   { key: 'audit',     label: 'Audit Log',       roles: STAFF },
 ]
@@ -31,8 +33,6 @@ export const PAGE_TITLES = {
 
 export const OCR_STEPS    = ['Upload', 'Quality', 'Processing', 'Extraction', 'Validation', 'Confirm']
 export const GRADE_LEVELS = ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
-// Suggestions only: sections are typed in, and filters list the sections that records actually use
-export const SECTIONS     = ['Sampaguita', 'Orchid', 'Rosal', 'Ilang-Ilang', 'Jasmine']
 
 // School years from the current one back to 1990, newest first. A school year starts in June.
 const OLDEST_SCHOOL_YEAR = 1990
@@ -45,11 +45,13 @@ export const SCHOOL_YEARS = Array.from(
 export const CURRENT_SCHOOL_YEAR = SCHOOL_YEARS[0]
 
 export const PERM_MATRIX = [
-  { perm: 'Upload Form 137',     oic: true, admin: true,  teacher: true },
+  { perm: 'Upload Form 137',     oic: true, admin: true,  teacher: 'Own class' },
+  { perm: 'Fill out Form 137',   oic: true, admin: true,  teacher: 'Own class' },
   { perm: 'View records',        oic: true, admin: true,  teacher: 'Own class' },
   { perm: 'Validate OCR fields', oic: true, admin: true,  teacher: true },
   { perm: 'Edit or delete',      oic: true, admin: true,  teacher: false },
   { perm: 'View analytics',      oic: true, admin: true,  teacher: 'Own class' },
+  { perm: 'Manage sections',     oic: true, admin: true,  teacher: false },
   { perm: 'Manage users',        oic: true, admin: false, teacher: false },
   { perm: 'View audit log',      oic: true, admin: true,  teacher: false },
 ]
@@ -57,4 +59,5 @@ export const PERM_MATRIX = [
 export const AUDIT_BADGES = {
   LOGIN: 'b-blue', UPLOAD: 'b-blue', VALIDATE: 'b-green', EDIT: 'b-amber', DELETE: 'b-rose', DELETE_USER: 'b-rose',
   EDIT_USER: 'b-amber', RESET_PASSWORD: 'b-amber', CHANGE_PASSWORD: 'b-amber',
+  ENCODE: 'b-blue', ADD_SECTION: 'b-green', EDIT_SECTION: 'b-amber', DELETE_SECTION: 'b-rose',
 }

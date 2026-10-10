@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Card, Alert, Btn, ConfBar, StatusBanner } from '../../components/ui/index'
+import ScanPreview from '../../components/ui/ScanPreview'
 import { ocrAPI } from '../../utils/api'
-import { useObjectUrl } from '../../utils/useObjectUrl'
 import { errorMessage, formatMB } from '../../utils/format'
 import { pupilName } from './shared'
 
@@ -17,7 +17,7 @@ const VERDICT_TEXT = {
   poor: 'OCR is likely to misread this scan. Rescanning is recommended.',
 }
 
-// Checks the real image on the server (resolution, contrast, brightness, sharpness, tilt, ink coverage)
+// Checks the real scan on the server (resolution, contrast, brightness, sharpness, tilt, ink coverage)
 function useQualityCheck(file) {
   const [quality, setQuality] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -53,6 +53,11 @@ function QualityReport({ quality }) {
           </div>
         )
       })}
+      {quality.pages > 1 && (
+        <Alert type="amber">
+          <strong>This PDF has {quality.pages} pages.</strong> Only page 1 is read. Upload the other pages as separate files.
+        </Alert>
+      )}
       <Alert type={verdict.alert} style={{ marginBottom: 14 }}>
         <strong>{quality.assessment}.</strong> {VERDICT_TEXT[quality.status]}
       </Alert>
@@ -65,7 +70,6 @@ export default function StepQuality({ data, onNext, onBack }) {
   const { quality, loading: checking, error: checkError } = useQualityCheck(file)
   const [running, setRunning] = useState(false)
   const [error,   setError]   = useState('')
-  const preview = useObjectUrl(file)
 
   const handleRunOCR = async () => {
     setRunning(true); setError('')
@@ -90,7 +94,7 @@ export default function StepQuality({ data, onNext, onBack }) {
   return (
     <div className="g2">
       <Card title="Document preview">
-        {preview && <img src={preview} alt="Preview" className="upload-preview" style={{ maxHeight: 'none' }}/>}
+        <ScanPreview file={file} alt="Preview" className="upload-preview" style={{ maxHeight: 'none' }}/>
         <div style={{ fontSize: 12 }}><strong>{file?.name}</strong> — {formatMB(file?.size)}</div>
         <div className="hint" style={{ marginTop: 4 }}>{pupilName(form)} — {form.grade}</div>
       </Card>

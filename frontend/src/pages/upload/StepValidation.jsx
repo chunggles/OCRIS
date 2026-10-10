@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Card, Btn, Badge, Notice } from '../../components/ui/index'
-import { useObjectUrl } from '../../utils/useObjectUrl'
+import ScanPreview from '../../components/ui/ScanPreview'
 import { NA, plural } from '../../utils/format'
 
 // Flagged fields get a position-based key (_k), not f.field: names can repeat across
@@ -42,7 +42,6 @@ export default function StepValidation({ data, onNext, onBack }) {
   const [values,    setValues]    = useState(() => Object.fromEntries(flagged.map(f => [f._k, ''])))
   const [confirmed, setConfirmed] = useState(() => Object.fromEntries(flagged.map(f => [f._k, false])))
   const [error,     setError]     = useState('')
-  const preview = useObjectUrl(data.file)
 
   const doneCount = Object.values(confirmed).filter(Boolean).length
   const remaining = flagged.length - doneCount
@@ -109,7 +108,7 @@ export default function StepValidation({ data, onNext, onBack }) {
         {/* Left: source document stays in view while scrolling the list */}
         <div style={{ position: 'sticky', top: 0 }}>
           <Card title="Source document — compare against this">
-            {preview && <img src={preview} alt="Source scan" className="review-source"/>}
+            <ScanPreview file={data.file} alt="Source scan" className="review-source"/>
             <div className="hint" style={{ marginTop: 10, lineHeight: 1.6 }}>
               Type the correct grade, then click <strong>Confirm</strong> or press <strong>Enter</strong>.
               Click <strong>N/A</strong> if the field is blank in the source.

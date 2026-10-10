@@ -3,9 +3,10 @@ import { useApp } from '../context/AppContext'
 import { isStaffRole } from '../data/constants'
 import { Card, Btn, InfoRow, StatusBanner, EmptyState, PageHeader, RemarksBadge, Notice } from '../components/ui/index'
 import DownloadScanBtn from '../components/ui/DownloadScanBtn'
+import PrintFormBtn from './form137/PrintFormBtn'
 import { recordsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
-import { formatDateTime, isNA, plural, NA, PASSING_GRADE } from '../utils/format'
+import { formatDateTime, isNA, plural, NA, PASSING_GRADE, FOR_VERIFICATION } from '../utils/format'
 
 const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
 const GRADE_KEYS = [...QUARTERS, 'final']
@@ -79,6 +80,28 @@ function CorrectionsCard({ corrections }) {
   )
 }
 
+// What a typed-in SF10-ES holds beside the record's own grades; scanned records have none
+const DETAIL_LABELS = [['middle_name', 'Middle name'], ['name_ext', 'Name extension'], ['birthdate', 'Birthdate'], ['sex', 'Sex']]
+
+function FormDetailsCard({ record }) {
+  const details = record.details || {}
+  const info = DETAIL_LABELS.filter(([field]) => details[field])
+  // Year blocks of the sheet other than the one this record is filed under
+  const otherYears = (Array.isArray(details.blocks) ? details.blocks : [])
+    .filter(b => b?.grade_level && !(b.grade_level === record.grade_level && b.school_year === record.school_year))
+    .map(b => `${b.grade_level}${b.section ? ` – ${b.section}` : ''}${b.school_year ? ` (${b.school_year})` : ''}`)
+  if (info.length === 0 && otherYears.length === 0) return null
+  return (
+    <Card title="Form 137 (SF10-ES) details">
+      {info.map(([field, label]) => <InfoRow key={field} label={label}>{details[field]}</InfoRow>)}
+      {otherYears.length > 0 && <InfoRow label="Other school years">{otherYears.join(' · ')}</InfoRow>}
+      {otherYears.length > 0 && (
+        <div className="hint">The grades above are for {record.grade_level}, {record.school_year}. Open the form to see the other school years.</div>
+      )}
+    </Card>
+  )
+}
+
 export default function RecordDetailPage() {
   const { nav, navParams, user } = useApp()
   const recordId = navParams?.recordId
@@ -119,6 +142,11 @@ export default function RecordDetailPage() {
   const editing = draft !== null
   const grades = editing ? draft.grades : r.grades || {}
   const subjectCount = Object.keys(grades).length
+  // a subject with nothing at all filled in was not taken; a subject with some grades but not others has gaps
+  const missingCount = Object.values(grades).reduce((count, g) => {
+    const blanks = GRADE_KEYS.filter(key => isNA(g?.[key])).length
+    return count + (blanks < GRADE_KEYS.length ? blanks : 0)
+  }, 0)
 
   const startEdit = () => {
     setSaveError('')
@@ -149,7 +177,10 @@ export default function RecordDetailPage() {
       {header}
       <div className="btn-row" style={{ marginBottom: 12 }}>
         {backButton}
+        {!editing && <PrintFormBtn record={r} size="" label={r.scan_id ? 'Print scanned form' : 'Print Form 137'}/>}
         <DownloadScanBtn scanId={r.scan_id} size="" variant="primary" label="Download original form"/>
+        {/* A typed-in form has no scan; it is edited on the Form 137 sheet, by staff or by the class's teacher */}
+        {!r.scan_id && !editing && <Btn variant="primary" onClick={() => nav('fillform', { recordId })}>Edit on Form 137</Btn>}
         {isStaffRole(user?.role) && !editing && <Btn onClick={startEdit}>Edit record</Btn>}
         {editing && <Btn variant="success" onClick={handleSave} disabled={saving}>{saving ? 'Saving...' : 'Save changes'}</Btn>}
         {editing && <Btn onClick={() => setDraft(null)} disabled={saving}>Cancel</Btn>}
@@ -191,9 +222,16 @@ export default function RecordDetailPage() {
       </div>
 
       <Card title="Grades" meta={plural(subjectCount, 'subject')}>
+        {!editing && missingCount > 0 && (
+          <Notice type="error">
+            {plural(missingCount, 'grade')} on this record {missingCount === 1 ? 'is' : 'are'} missing: <strong>{FOR_VERIFICATION}</strong>.
+            Check {missingCount === 1 ? 'it' : 'them'} against the paper form. No value is estimated.
+          </Notice>
+        )}
         <GradesTable grades={grades} onChange={editing ? setGrade : undefined}/>
       </Card>
 
+      <FormDetailsCard record={r}/>
       <CorrectionsCard corrections={r.corrections}/>
     </div>
   )
