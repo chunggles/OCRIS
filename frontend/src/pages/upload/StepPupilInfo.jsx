@@ -19,7 +19,7 @@ const SCAN_GUIDELINES = [
   ['green', 'Yes',  'All grade boxes fully visible inside the frame'],
   ['amber', 'Note', 'Handwritten grades will be flagged for review — this is normal'],
   ['amber', 'Note', 'Blank fields stored as N/A, never zero'],
-  ['amber', 'Note', 'For a PDF, only the first page is read — one form per file'],
+  ['amber', 'Note', 'For a PDF, up to 4 pages are read as one form (the front and back of an SF10-ES) — one pupil per file'],
   ['rose',  'No',   'Phone camera photos — shadows distort OCR'],
   ['rose',  'No',   'Torn or severely water-damaged documents'],
 ]

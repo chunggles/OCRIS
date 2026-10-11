@@ -45,7 +45,7 @@ Recorded in [CHANGELOG.md](../CHANGELOG.md).
 
 | # | Limitation | Effect |
 |---|---|---|
-| 1 | One page per upload: a JPG, a PNG, or the first page of a PDF. Multi-page forms are not supported. | A form with grades on two pages needs two uploads and produces two records. The other pages of a PDF are ignored, with a warning at the quality step. |
+| 1 | A JPG or PNG is one page; a PDF is read up to 4 pages, with the pupil's details taken from page 1. | The back page of an SF10-ES has no layout of its own yet, so it is read only if it happens to match the front's table. Skipped pages are reported in a note. |
 | 2 | The grade table reader expects the column order Subject, Q1, Q2, Q3, Q4, Final, and a fixed list of nine subjects. | Other subjects are skipped. Other column layouts are misassigned or flagged. |
 | 3 | Handwritten grades are mostly flagged for manual entry. | Little time is saved on handwritten forms. |
 | 4 | OCR takes about 17 seconds per upload and runs inside the web request. | The user waits; several simultaneous uploads would slow the server. |

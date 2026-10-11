@@ -55,7 +55,7 @@ function QualityReport({ quality }) {
       })}
       {quality.pages > 1 && (
         <Alert type="amber">
-          <strong>This PDF has {quality.pages} pages.</strong> Only page 1 is read. Upload the other pages as separate files.
+          <strong>This PDF has {quality.pages} pages.</strong> The image quality shown is for page 1. Up to 4 pages are read, and the pupil's details come from page 1. Reading takes longer.
         </Alert>
       )}
       <Alert type={verdict.alert} style={{ marginBottom: 14 }}>

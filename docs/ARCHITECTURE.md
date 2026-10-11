@@ -74,7 +74,7 @@ backend/
       storage.py            saves and finds uploaded files
     ocr/
       engine.py             read_scan / run_ocr entry points, error handling, retry on a smoothed copy
-      pdf.py                opens a scan as an image; renders page 1 of a PDF
+      pdf.py                opens a scan as an image; renders the pages of a PDF
       quality.py            image quality measurements
       preprocess.py         straightening and clean-up before OCR
       table.py              reads the grade table cell by cell; one or two table columns (SF10-ES)

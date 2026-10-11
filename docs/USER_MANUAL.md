@@ -106,7 +106,7 @@ Click **Upload Form 137** in the menu. The upload has six steps, shown as tabs a
 | Do | Save as **JPG, PNG or PDF** |
 | Avoid | Phone camera photos; shadows cause misreads |
 | Avoid | Torn or badly water-damaged forms |
-| Note | For a PDF, only the **first page** is read. Save each form as its own file. |
+| Note | For a PDF, up to **4 pages** are read as one form, such as the front and back of an SF10-ES. Save each pupil as its own file. Notes about skipped pages appear on the Extracted Fields step. |
 
 Each form is one image, up to 20 MB. You can upload up to 30 forms of the same class at a time.
 
