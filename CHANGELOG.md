@@ -66,6 +66,12 @@ Not done: cloud hosting setup, moving accounts and scan files off local disk, an
 - **The pupil's name is optional at upload** and is read from the form.
 - `POST /ocr/validate/` accepts `renames` and returns `pupil_name`; duplicate and LRN problems come back as `409` and `400`.
 
+### 7c. OCR weaknesses (section C of the weaknesses list)
+
+- **Several PDF pages.** Up to 4 pages are read; grade tables on later pages are added to the first page's. Pages without a grade table, or repeating learning areas already read, are skipped with a note. `read_scan()` now returns `(fields, page text, notes)`, `parse_grade_table()` returns `(fields, levels, notes)`, `load_page()` also returns the page count, and `POST /ocr/upload/` returns `notes`.
+- **Year-block names.** A misread or missing "Classified as Grade" is corrected from the other blocks when they agree, with a note; otherwise the old fallback to "Block n" applies.
+- **Unread first row.** The row just above a block's first learning area is kept as "Unread learning area" instead of being dropped, unless it looks like the heading.
+
 ### 8. New dependencies and settings
 
 - Backend: `pypdfium2` (run `pip install -r requirements.txt`).

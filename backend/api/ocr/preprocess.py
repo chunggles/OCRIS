@@ -13,15 +13,18 @@ SMOOTH_MIN_RADIUS, SMOOTH_MAX_RADIUS = 0.6, 1.2   # ...kept within these
 get_image_quality = analyze_image
 
 
-def load_page(image_path):
-    """(greyscale page straightened to level, effective DPI). Raises if the file isn't an image or a PDF."""
-    original, _ = open_scan(image_path)
+def load_page(image_path, index=0):
+    """
+    (greyscale page straightened to level, effective DPI, number of pages in the file). `index`
+    picks a page of a PDF. Raises if the file isn't an image or a PDF.
+    """
+    original, pages = open_scan(image_path, index)
     dpi, _ = effective_dpi(original)
     grey = original.convert('RGB').convert('L')
     skew = estimate_skew(grey)
     if skew is not None and abs(skew) >= MIN_SKEW_TO_FIX:
         grey = grey.rotate(-skew, resample=Image.BICUBIC, expand=True, fillcolor=255)
-    return grey, dpi
+    return grey, dpi, pages
 
 
 def smoothed(grey, dpi):

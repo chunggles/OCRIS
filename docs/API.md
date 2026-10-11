@@ -243,7 +243,7 @@ A teacher may only send their assigned `grade_level` and `section` (section case
 
 | Field | Required | Meaning |
 |---|---|---|
-| `file` | Yes | JPG, PNG or PDF, up to 20 MB. For a PDF, page 1 is read. |
+| `file` | Yes | JPG, PNG or PDF, up to 20 MB. For a PDF, up to 4 pages are read. |
 | `pupil_name` | No | Stored on the scan |
 | `grade_level` | No | Stored on the scan |
 | `section` | No | Stored on the scan |
@@ -262,7 +262,8 @@ Response `200`:
     { "field": "English I Q2", "raw": "88 / 83", "value": "88", "conf": 0, "status": "warn", "flagged": true },
     { "field": "English I Q3", "raw": "", "value": "N/A", "conf": 0, "status": "null", "flagged": false }
   ],
-  "summary": { "total": 95, "auto_approved": 78, "flagged": 14, "null_count": 3, "overall_conf": 88.4 }
+  "summary": { "total": 95, "auto_approved": 78, "flagged": 14, "null_count": 3, "overall_conf": 88.4 },
+  "notes": ["Page 2 has no grade table, so it was not read."]
 }
 ```
 

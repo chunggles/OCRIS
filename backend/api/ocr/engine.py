@@ -6,6 +6,7 @@ Grades are read cell by cell from the ruled grade table (see table.py). Scans wi
 a detectable table fall back to parsing the page's free text line by line.
 """
 import logging
+import re
 
 from django.conf import settings
 from PIL import UnidentifiedImageError
@@ -38,6 +39,8 @@ class OCRError(Exception):
 
 
 MAX_PAGE_TEXT = 20000   # characters of page text kept with a scan for searching
+BLOCK_NAME_RE = re.compile(r'Grade [1-6]|Block \d')
+MAX_PAGES = 4           # pages of a PDF that are read; an SF10-ES is a front and a back
 
 
 def run_ocr(image_path, known_sections=()):
@@ -47,15 +50,17 @@ def run_ocr(image_path, known_sections=()):
 
 def read_scan(image_path, known_sections=()):
     """
-    (fields, page text). The fields are the pupil's details, then every grade. The text is
-    everything read off the page, kept so records can be found by what is written on their
-    form. known_sections are the section names set up in the system, used to correct a
-    misread section name.
+    (fields, page text, notes). The fields are the pupil's details, then every grade. The text is
+    everything read off the first page, kept so records can be found by what is written on
+    their form. The notes are things the person checking the form should know, such as a page
+    that was skipped. known_sections are the section names set up in the system, used to
+    correct a misread section name. The pupil's details are read from the first page; the
+    grade tables of the further pages of a PDF are added after it.
     """
     if not TESSERACT_AVAILABLE:
         raise OCRError('The OCR engine is not installed on the server.')
     try:
-        page, dpi = load_page(image_path)
+        page, dpi, page_count = load_page(image_path)
         # The page's words are read twice, binarised and as plain grey. Each way loses different
         # small print, and the pupil's details are taken from whichever reading has them.
         words, grey_words = (_page_words(img) for img in (prepare_for_text(page, dpi), prepare_grey_for_text(page, dpi)))
@@ -65,7 +70,9 @@ def read_scan(image_path, known_sections=()):
             again = parse_grade_table(smoothed(page, dpi))
             if again and _readability(again[0]) > _readability(table[0]):
                 table = again
-        grades, year_levels = table if table else (_grades_from_text(page, dpi), [])
+        grades, year_levels, notes = table if table else (_grades_from_text(page, dpi), [], [])
+        if table and page_count > 1:
+            grades, year_levels, notes = _add_later_pages(image_path, page_count, grades, year_levels, notes)
     except UnidentifiedImageError as e:
         raise OCRError(str(e))  # open_scan words these for the user
     except pytesseract.TesseractNotFoundError:
@@ -81,7 +88,37 @@ def read_scan(image_path, known_sections=()):
         raise OCRError('Every grade box on this form is empty. Check that you chose the filled-in form, not a blank one.')
     fields = extract_pupil_info(words, year_levels, known_sections, other_pages=[grey_words]) + grades
     # the fuller of the two readings of the page
-    return fields, max(words.text, grey_words.text, key=len)[:MAX_PAGE_TEXT]
+    return fields, max(words.text, grey_words.text, key=len)[:MAX_PAGE_TEXT], notes
+
+
+def _add_later_pages(image_path, page_count, grades, year_levels, notes):
+    """
+    The grade fields, year levels and notes of the first page with the grade tables of the
+    PDF's further pages added (at most MAX_PAGES pages in all). A page without a grade table,
+    or one that repeats learning areas already read, is left out and a note says so.
+    """
+    notes = list(notes)
+    if page_count > MAX_PAGES:
+        notes.append(f'This PDF has {page_count} pages. Only the first {MAX_PAGES} were read.')
+    for index in range(1, min(page_count, MAX_PAGES)):
+        number = index + 1
+        later, _, _ = load_page(image_path, index)
+        blocks_so_far = len({m.group(0) for f in grades if (m := BLOCK_NAME_RE.search(f['field']))})
+        table = parse_grade_table(later, block_start=blocks_so_far + 1)   # keeps unnamed "Block n" labels apart
+        if not table:
+            notes.append(f'Page {number} has no grade table, so it was not read.')
+            continue
+        fields, levels, more_notes = table
+        names = {f['field'] for f in grades}
+        if any(f['field'] in names for f in fields):
+            notes.append(f'Page {number} repeats learning areas already read from an earlier page, so it was not added. '
+                         'Upload it as a separate form if it is another school year.')
+            continue
+        grades = grades + fields
+        year_levels = year_levels + levels
+        notes += [f'Page {number}: {note}' for note in more_notes]
+        notes.append(f'Page {number}: {len(fields)} grade boxes were read and added.')
+    return grades, year_levels, notes
 
 
 def _page_words(img):

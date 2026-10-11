@@ -20,7 +20,7 @@ flowchart TD
     J --> K[(Saved record)]
 ```
 
-Supported input: one JPG, PNG or PDF file per upload, up to 20 MB. A PDF's first page is rendered to an image at 300 DPI (`ocr/pdf.py`, using `pypdfium2`) and then goes through the same steps as an image; its other pages are not read.
+Supported input: one JPG, PNG or PDF file per upload, up to 20 MB. A PDF page is rendered to an image at 300 DPI (`ocr/pdf.py`, using `pypdfium2`) and then goes through the same steps as an image. Up to 4 pages are read: the pupil's details come from page 1, and the grade tables of later pages are added to it. A page with no grade table, or one that repeats learning areas already read, is skipped, and the upload result carries a note saying so.
 
 Two form layouts are read:
 

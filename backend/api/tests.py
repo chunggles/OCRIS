@@ -101,6 +101,51 @@ class YearBlockTests(SimpleTestCase):
         self.assertEqual(grading.choose_year_block(blocks, 'Grade 3'), ({'English': {'final': '88'}}, []))
 
 
+class YearBlockLabelTests(SimpleTestCase):
+    """How year blocks are named after their "Classified as Grade", and how extra PDF pages are added."""
+
+    def numbers(self, *reads):
+        from api.ocr.table import _consistent_grades
+        return _consistent_grades([(n, 90) if n else None for n in reads])
+
+    def test_grades_read_in_order_are_kept(self):
+        self.assertEqual(self.numbers(1, 2, 3, 4), ([1, 2, 3, 4], []))
+        self.assertEqual(self.numbers(1, 3, 4), ([1, 3, 4], []))             # in order: taken as read
+        self.assertEqual(self.numbers(None, None, 3, None), ([None, None, 3, None], []))   # one read is not enough to fill in
+
+    def test_blocks_that_could_not_be_read_follow_the_sequence(self):
+        self.assertEqual(self.numbers(None, 2, 3, None), ([1, 2, 3, 4], []))
+        self.assertEqual(self.numbers(None, None), ([None, None], []))
+
+    def test_a_misread_grade_follows_the_other_blocks_and_is_reported(self):
+        numbers, notes = self.numbers(1, 2, 5, 4)
+        self.assertEqual(numbers, [1, 2, 3, 4])
+        self.assertEqual(len(notes), 1)
+        self.assertIn('Block 3 reads as Grade 5 but was filed as Grade 3', notes[0])
+        # no clear majority, or a sequence that would leave Grade 1 to 6: no block is named after its grade
+        self.assertEqual(self.numbers(2, 1, 4, 3), ([None] * 4, []))
+        self.assertEqual(self.numbers(5, 6, 5, 6)[0], [None] * 4)
+
+    def test_later_pages_of_a_pdf_are_added_once(self):
+        from unittest import mock
+        from api.ocr import engine
+
+        def field(name):
+            return {'field': name, 'value': '85', 'raw': '85', 'conf': 95, 'status': 'ok', 'flagged': False}
+
+        first = [field('Filipino Grade 1 Q1'), field('Filipino Grade 2 Q1')]
+        later = [([field('Filipino Grade 5 Q1')], [('Grade 5', 90)], []),   # page 2: new grades
+                 None,                                                       # page 3: no grade table
+                 ([field('Filipino Grade 1 Q1')], [], [])]                   # page 4: repeats page 1
+        with mock.patch.object(engine, 'load_page', return_value=(None, 300, 4)),                 mock.patch.object(engine, 'parse_grade_table', side_effect=later):
+            grades, levels, notes = engine._add_later_pages('x.pdf', 4, first, [('Grade 1', 90)], [])
+        self.assertEqual([f['field'] for f in grades], ['Filipino Grade 1 Q1', 'Filipino Grade 2 Q1', 'Filipino Grade 5 Q1'])
+        self.assertEqual(levels, [('Grade 1', 90), ('Grade 5', 90)])
+        self.assertEqual(len(notes), 3)
+        self.assertIn('Page 3 has no grade table', ' '.join(notes))
+        self.assertIn('Page 4 repeats learning areas', ' '.join(notes))
+
+
 class PdfScanTests(SimpleTestCase):
     """A PDF is turned into an image of its first page, so the OCR pipeline can read it."""
 

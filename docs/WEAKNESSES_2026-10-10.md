@@ -59,13 +59,20 @@ Tick the box when an item is done. Sections A and B are fixed in code, apart fro
 
 ## C. OCR weaknesses
 
+> **Status, 2026-10-11.** Items 25, 28 and 29 are changed in code. Items 23, 24, 26 and 27 are left open: they are limits of accuracy or of the layouts supported, and cannot be settled without real scans and a new layout.
+>
+> - **25:** Up to 4 pages of a PDF are read. The pupil's details and the page text come from page 1; the grade tables of the later pages are added. A page with no grade table, or one that repeats learning areas already read, is skipped, and a note on the Extracted Fields step says so. A page past the fourth is not read, with a note. Each extra page adds 20 to 30 seconds. Tested with a three-page PDF (form, blank page, same form again) and with unit tests; not tried on a real SF10 back page, which has no layout of its own (item 24).
+> - **28:** The row just above a block's first recognised learning area is now kept as "Unread learning area" when its name is unreadable, unless it reads like the table heading ("Learning Areas"). Rows further up are still left out, because the heading's "1 2 3 4" would pass as grades. Not exercised by any of the sample scans; the sample results did not change.
+> - **29:** Year blocks are named after their "Classified as Grade" more often. Blocks that could not be read are filled in from the others when the grades read agree, and one misread number (a 2 read for a 3) is corrected when most of the other blocks agree. Each correction is shown as a note. The risk: a pupil who repeated a grade (Grade 3, 3, 4, 5) would have the first block filed as Grade 2, with a note. Before this change such a form fell back to "Block 1" to "Block 4".
+> - **Check on the sample scans:** the five sample files (Form 137-A mockup, secondary form, handwritten form, a typed SF10 PDF and an exported SF10 PDF) were read before and after the changes; the 95 fields of each are identical.
+
 - [ ] **23. Handwriting reads poorly.** On the handwriting-style test, 80 of 130 grades were auto-approved and 50 needed manual review. The school's archive is mostly handwritten.
 - [ ] **24. Only two layouts are supported:** Form 137-A and the front page of the SF10-ES (Revised 2025). Older formats and the SF10 back page (Grades 5 and 6) are not.
-- [ ] **25. Only page 1 of a PDF is read.** The other pages are ignored, with a warning.
+- [x] **25. Only page 1 of a PDF is read.** The other pages are ignored, with a warning.
 - [ ] **26. All accuracy figures come from generated test copies,** not from real paper that has been through a pen and a scanner.
 - [ ] **27. A faded, grainy scan still needed 28 of 130 grades checked by hand.**
-- [ ] **28. A row at the very top of a block can still be dropped** when its learning-area name is unreadable. Rows lower in the block are kept as "Unread learning area".
-- [ ] **29. Block labels fall back to "Block 1" to "Block 4"** when a "Classified as Grade" number is misread.
+- [x] **28. A row at the very top of a block can still be dropped** when its learning-area name is unreadable. Rows lower in the block are kept as "Unread learning area".
+- [x] **29. Block labels fall back to "Block 1" to "Block 4"** when a "Classified as Grade" number is misread.
 
 ## D. Security and privacy
 

@@ -27,7 +27,7 @@ import pytesseract
 from django.conf import settings
 from PIL import Image, ImageOps
 
-from ..constants import NA
+from ..constants import GRADE_LEVELS, NA
 from .parser import GRADE_COLUMNS, make_field, match_subject_span
 from .quality import _percentile, ink_threshold
 
@@ -492,9 +492,10 @@ def _with_unread_rows(block, unread, rows, row_columns):
     The block plus the rows inside it whose learning area couldn't be read. Such a row still
     has grades, and leaving it out would lose them without anyone noticing, so it is kept under
     the name UNREAD_SUBJECT for a person to see. The row must be a full-height row of the
-    table with a name written in its first cell. Only rows between the block's first and last
-    recognised subjects are taken: above them is the table's heading (whose "1 2 3 4" would
-    pass for grades), below them "General Average".
+    table with a name written in its first cell. Rows between the block's first and last
+    recognised subjects are taken, and the one row just above the first subject unless it reads
+    like the table's heading ("Learning Areas"); further up is the heading's "1 2 3 4", which
+    would pass for grades, and below the last subject is "General Average".
     """
     def is_grade_row(i):
         return len(row_columns[i]) >= len(GRADE_COLUMNS) + 2
@@ -512,9 +513,15 @@ def _with_unread_rows(block, unread, rows, row_columns):
             return False
         return difflib.SequenceMatcher(None, text.casefold(), 'general average').ratio() < NOT_A_SUBJECT_RATIO
 
+    def is_heading(i):
+        text = unread.get(i, '').casefold()
+        return 'learning' in text or difflib.SequenceMatcher(None, text, 'learning areas').ratio() >= NOT_A_SUBJECT_RATIO
+
     first, last = block[0].index, block[-1].index
     known = {row.index for row in block}
     extra = [i for i in range(first, last) if i not in known and is_unread_subject(i)]
+    if first > 0 and is_unread_subject(first - 1) and not is_heading(first - 1):
+        extra.append(first - 1)
     return sorted(block + [SubjectRow(i, UNREAD_SUBJECT, None, 0) for i in extra], key=lambda row: row.index)
 
 
@@ -566,7 +573,7 @@ def _parse_single(grey):
         levels.update({row.index: level for row in block})
     label_of = _unique_labeller(lambda row: levels[row.index])
     jobs = [job for block, cells in table.blocks for job in _block_jobs(table, block, cells, label_of)]
-    return _read_jobs(jobs), year_levels
+    return _read_jobs(jobs), year_levels, []
 
 
 # ── Two tables side by side (SF10-ES) ────────────────────────────────────────
@@ -620,11 +627,46 @@ def _classified_grade(table, block):
     return None
 
 
-def _parse_side_by_side(grey, gutter):
+def _consistent_grades(reads, block_start=1):
+    """
+    ([grade number or None for each year block], notes). `reads` holds each block's "Classified as
+    Grade" as (number, conf), or None when it could not be read. A pupil's blocks run one grade
+    after another, so:
+      - grades read in order are kept, and blocks that could not be read are filled in when all
+        the grades read agree on where the sequence starts;
+      - grades out of order mean one was misread (a handwritten 1 as a 2, say). When most of the
+        grades read agree on where the sequence starts, the others follow it and a note says
+        which blocks were changed; otherwise no block is named after its grade.
+    """
+    positions = [(i, read[0]) for i, read in enumerate(reads) if read]
+    offsets = [number - i for i, number in positions]
+    read_numbers = [number for _, number in positions]
+    in_order = all(a < b for a, b in zip(read_numbers, read_numbers[1:]))
+
+    def sequence(offset):
+        numbers = [i + offset for i in range(len(reads))]
+        return numbers if all(1 <= n <= len(GRADE_LEVELS) for n in numbers) else None
+
+    if in_order:
+        if len(set(offsets)) == 1 and len(positions) >= 2 and sequence(offsets[0]):
+            return sequence(offsets[0]), []
+        return [read[0] if read else None for read in reads], []
+    best = max(set(offsets), key=offsets.count)
+    # a clear majority of the grades read must agree, and the sequence must fit Grade 1 to 6
+    if offsets.count(best) > 1 and offsets.count(best) * 2 > len(positions) and sequence(best):
+        numbers = sequence(best)
+        notes = [f'Block {block_start + i} reads as Grade {read[0]} but was filed as Grade {numbers[i]}, to follow the other blocks. Check it against the form.'
+                 for i, read in enumerate(reads) if read and read[0] != numbers[i]]
+        return numbers, notes
+    return [None] * len(reads), []
+
+
+def _parse_side_by_side(grey, gutter, block_start=1):
     """
     SF10-ES: up to four year blocks, two tables wide. Each half of the page is read as its own
     table. Blocks are named after their "Classified as Grade", or their position when that
-    can't be read; blocks and subject rows left completely empty are dropped.
+    can't be read; blocks and subject rows left completely empty are dropped. block_start is the
+    number of the first block, for a later page of the same form. Returns (fields, levels, notes).
     """
     halves = [grey.crop((0, 0, gutter[1], grey.height)), grey.crop((gutter[0], 0, grey.width, grey.height))]
     found = []   # (top of block, half index, table, block, grade cells)
@@ -645,14 +687,12 @@ def _parse_side_by_side(grey, gutter):
     # blocks run in order, so a repeat or a step backwards means one was misread (a handwritten
     # 1 as a 2, say). The whole form then falls back to block numbers, which are never wrong.
     grades = [_classified_grade(table, block) for _, _, table, block, _ in found]
-    read = [g[0] for g in grades if g]
-    trusted = all(a < b for a, b in zip(read, read[1:]))
+    numbers, notes = _consistent_grades(grades, block_start)
     suffixes, levels = {}, []
-    for n, ((_, h, _, block, _), grade) in enumerate(zip(found, grades), start=1):
-        named = bool(grade) and trusted
-        if named:
-            levels.append((f'Grade {grade[0]}', grade[1]))
-        suffixes.update({(h, row.index): f'Grade {grade[0]}' if named else f'Block {n}' for row in block})
+    for n, ((_, h, _, block, _), number, grade) in enumerate(zip(found, numbers, grades), start=block_start):
+        if number:
+            levels.append((f'Grade {number}', grade[1] if grade else min((g[1] for g in grades if g), default=0)))
+        suffixes.update({(h, row.index): f'Grade {number}' if number else f'Block {n}' for row in block})
 
     fields = []
     half_of = {}   # one labeller for the page, so two blocks read as the same grade still get distinct names
@@ -669,21 +709,21 @@ def _parse_side_by_side(grey, gutter):
         # Nothing is filled in anywhere: report the first block's rows so the caller can say so
         _, h, table, block, cells = found[0]
         fields = _read_jobs(_block_jobs(table, block, cells, _unique_labeller(lambda row: suffixes[(h, row.index)])))
-        return fields, levels
-    return fields, levels
+        return fields, levels, notes
+    return fields, levels, notes
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────
 
-def parse_grade_table(grey):
+def parse_grade_table(grey, block_start=1):
     """
-    (grade fields read cell by cell, levels read). Levels are (label, conf) pairs in page
+    (grade fields read cell by cell, levels read, notes for the person checking the form). Levels are (label, conf) pairs in page
     order: the year level written after the subjects on a Form 137-A ("I", "II"), or each
     block's "Grade N" on an SF10-ES. Returns None if no ruled grade table with subjects was found.
     """
     gutter = find_gutter(grey)
     if gutter:
-        result = _parse_side_by_side(grey, gutter)
+        result = _parse_side_by_side(grey, gutter, block_start)
         if result:
             return result
     return _parse_single(grey)

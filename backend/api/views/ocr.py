@@ -39,7 +39,7 @@ def ocr_upload(request):
     stored_name, path = storage.save_upload(file)
     try:
         known_sections = [section['name'] for node in db.section_tree() for section in node['sections']]
-        fields, page_text = read_scan(str(path), known_sections)
+        fields, page_text, notes = read_scan(str(path), known_sections)
     except OCRError as e:
         storage.discard(path)  # nothing was extracted, so don't keep the file
         return detail(str(e), 422)
@@ -64,7 +64,7 @@ def ocr_upload(request):
         'confidence': summary['overall_conf'],
         'pupil': pupil['pupil_name'],
     })
-    return Response({'scan_id': scan_id, 'quality': quality, 'fields': fields, 'summary': summary})
+    return Response({'scan_id': scan_id, 'quality': quality, 'fields': fields, 'summary': summary, 'notes': notes})
 
 
 @api_view(['POST'])

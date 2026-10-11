@@ -64,6 +64,12 @@ export default function StepExtraction({ data, onNext, onBack }) {
           <div style={{ marginTop: 6 }}>If the entered details are wrong, go back to step 1. The saved record uses the entered details.</div>
         </Alert>
       )}
+      {(scanResult?.notes || []).length > 0 && (
+        <Alert type="amber">
+          <strong>About this scan.</strong>
+          <ul style={{ margin: '6px 0 0 18px' }}>{scanResult.notes.map(note => <li key={note}>{note}</li>)}</ul>
+        </Alert>
+      )}
       <SummaryTiles tiles={[
         { value: summary.auto_approved,       label: 'Auto-approved',          color: 'green' },
         { value: summary.flagged,             label: 'Flagged — needs review', color: 'amber' },

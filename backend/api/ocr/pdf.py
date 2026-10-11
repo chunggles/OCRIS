@@ -1,8 +1,8 @@
 """
 Opening an uploaded scan as an image, whether it is an image file or a PDF.
 
-A PDF's first page is rendered to an image, so the rest of the OCR pipeline treats it like
-any other scan. The form is expected to be on page 1; other pages are not read.
+A PDF page is rendered to an image, so the rest of the OCR pipeline treats it like any other
+scan. Page 1 is the form; engine.read_scan() reads the further pages too (the back of an SF10-ES).
 """
 import ctypes
 import logging
@@ -40,8 +40,8 @@ def _is_pdf(source):
         return f.read(len(PDF_MAGIC)) == PDF_MAGIC
 
 
-def _render_first_page(source):
-    """(image of page 1, number of pages). The image carries the DPI it was rendered at."""
+def _render_page(source, index=0):
+    """(image of a page, number of pages). The image carries the DPI it was rendered at."""
     if pypdfium2 is None:
         raise UnidentifiedImageError('PDF support is not installed on the server.')
     # The file is read into memory first, so the PDF library never holds the stored file open
@@ -65,7 +65,9 @@ def _render_first_page(source):
             except Exception as e:      # a damaged form definition shouldn't stop the page being read
                 logger.warning(f'PDF form fields could not be set up: {e}')
                 fields = False
-            page = document[0]
+            if index >= len(document):
+                raise UnidentifiedImageError(f'This PDF has no page {index + 1}.')
+            page = document[index]
             scale = min(RENDER_DPI / PDF_POINTS_PER_INCH, MAX_RENDER_PIXELS / max(page.get_size()))
             image = page.render(scale=scale, may_draw_forms=fields).to_pil().convert('RGB')
             _draw_plain_text_boxes(page, image)
@@ -163,14 +165,14 @@ def _draw_plain_text_boxes(page, image):
             y += line_height
 
 
-def open_scan(source):
+def open_scan(source, index=0):
     """
-    (image, number of pages) for a scan given as a path or an open binary file. An image file
-    counts as one page. Raises PIL's UnidentifiedImageError, with a message for the user, when
+    (image of page `index`, number of pages) for a scan given as a path or an open binary file.
+    An image file counts as one page. Raises PIL's UnidentifiedImageError, with a message for the user, when
     the file is neither an image nor a readable PDF.
     """
     if _is_pdf(source):
-        return _render_first_page(source)
+        return _render_page(source, index)
     try:
         image = Image.open(source)
         image.load()
