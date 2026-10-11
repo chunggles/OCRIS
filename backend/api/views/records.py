@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from .. import db
 from ..constants import NA
 from ..permissions import IsOICOrAdmin
-from ..services import grading, identity, storage
+from ..services import audit, grading, identity
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param, query_param
 
 # Fields that may be changed on a saved record. The average and remarks are never set
@@ -246,7 +246,13 @@ def record_update(request, record_id):
         if refusal:
             return refusal
     db.update_record(record_id, updates)
-    db.log_action('EDIT', request.user.username, {'record_id': record_id, 'fields': sorted(updates)})
+    details = {
+        'record_id': record_id, 'pupil': record.get('pupil_name'), 'fields': sorted(updates),
+        'changes': audit.field_changes(record, updates, [f for f in updates if f not in ('grades', 'details')]),
+    }
+    if 'grades' in updates:
+        details['grade_changes'] = audit.grade_changes(record.get('grades') or {}, updates['grades'])
+    db.log_action('EDIT', request.user.username, details)
     return Response(db.get_record(record_id))
 
 
@@ -258,18 +264,13 @@ def record_delete(request, record_id):
         return not_found()
     if not db.delete_record(record_id):
         return detail('Delete failed.', 500)
-    _delete_scan_of(record)
-    db.log_action('DELETE', request.user.username, {'record_id': record_id, 'pupil': record.get('pupil_name')})
-    return Response(status=204)
-
-
-def _delete_scan_of(record):
-    """Remove the record's scan and its image too, so no copy of the pupil's form is left behind."""
+    # The scan is kept: the original form is part of the audit trail. It can be purged later
+    # with "manage.py cleanup_scans --deleted-days N".
     scan_id = record.get('scan_id')
-    scan = db.get_scan(scan_id, fields=['filename']) if scan_id else None
-    if not scan:
-        return
-    path = storage.find_scan_file(scan.get('filename') or '')
-    if path:
-        storage.discard(path)
-    db.delete_scan(scan_id)
+    if scan_id:
+        db.mark_scan_record_deleted(scan_id, request.user.username)
+    db.log_action('DELETE', request.user.username, {
+        'record_id': record_id, 'pupil': record.get('pupil_name'), 'scan_kept': bool(scan_id),
+        'record': audit.record_snapshot(record),
+    })
+    return Response(status=204)

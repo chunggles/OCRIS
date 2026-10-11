@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ROLES } from '../../data/constants'
+import { ROLES, PASSWORD_RULES, passwordProblem } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
 import { usersAPI } from '../../utils/api'
 import RoleSelect from './RoleSelect'
@@ -9,7 +9,6 @@ const BLANK_FORM = {
   last_name: '', first_name: '', username: '', role: ROLES.TEACHER,
   assigned_grade: 'Grade 6', assigned_section: '', password: '',
 }
-const MIN_PASSWORD = 8
 
 function validate(form) {
   if (!form.last_name.trim())  return 'Last name is required.'
@@ -17,8 +16,7 @@ function validate(form) {
   if (!form.username.trim())   return 'Username is required.'
   if (form.role === ROLES.TEACHER && !form.assigned_section.trim()) return 'A teacher needs an assigned section.'
   if (!form.password)          return 'Password is required.'
-  if (form.password.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters.`
-  return null
+  return passwordProblem(form.password)
 }
 
 function toPayload(form) {
@@ -56,7 +54,7 @@ export default function AddUserForm({ onCreated }) {
     } catch (e) {
       setError(e?.offline
         ? "Can't reach the server. Try again in a moment."
-        : e?.data?.username?.[0] || e?.data?.detail || JSON.stringify(e?.data) || 'Failed to create account.')
+        : e?.data?.username?.[0] || e?.data?.password?.join(' ') || e?.data?.detail || JSON.stringify(e?.data) || 'Failed to create account.')
     } finally {
       setLoading(false)
     }
@@ -90,8 +88,9 @@ export default function AddUserForm({ onCreated }) {
           onGrade={v => set('assigned_grade', v)} onSection={v => set('assigned_section', v)}/>
       )}
 
-      <FormGroup label={`Temporary password * (min. ${MIN_PASSWORD} characters)`}>
-        <input className="fld" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder={`Min. ${MIN_PASSWORD} characters`}/>
+      <FormGroup label="Temporary password *">
+        <input className="fld" type="password" value={form.password} onChange={e => set('password', e.target.value)} placeholder="Temporary password" autoComplete="new-password"/>
+        <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>{PASSWORD_RULES} The user must choose their own at first sign-in.</div>
       </FormGroup>
 
       <Btn variant="primary" onClick={handleCreate} disabled={loading}>

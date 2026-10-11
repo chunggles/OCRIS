@@ -2,7 +2,7 @@
 
 This is a list of weaknesses and bugs found by comparing the system with the capstone proposal, "OCRIS (Optical Character Recognition Information System) – School Record Management Decision Support System Using OCR for Bayombong Central School". It is based on reading the code and on the OCR tests run between October 5 and 10.
 
-Tick the box when an item is done. Sections A and B are fixed in code, apart from the deployment items 1 to 4 and the paper correction 12.
+Tick the box when an item is done. Sections A, B, D and E are fixed in code, apart from the deployment items 1 to 4, the paper correction 12 and the print test 44. Section C is partly fixed (items 25, 28, 29).
 
 **Fix first:** items 1 to 4. They decide whether the system matches the paper's title (a cloud-based system). Item 14, on whether the analytics can be trusted, is fixed.
 
@@ -76,24 +76,46 @@ Tick the box when an item is done. Sections A and B are fixed in code, apart fro
 
 ## D. Security and privacy
 
-- [ ] **30. No limit on login attempts.** A password can be guessed indefinitely.
-- [ ] **31. Weak password rule.** Eight characters is the only requirement, and a temporary password does not have to be changed at first sign-in.
-- [ ] **32. The login token is kept in browser storage,** where a malicious script could read it.
-- [ ] **33. One token per user.** Signing out on one device signs the user out on all devices.
-- [ ] **34. Scans and backups are unencrypted.**
-- [ ] **35. The audit log is thin.** It records which fields changed but not the old and new values, and it is erased if the database is wiped.
-- [ ] **36. Deleting a record permanently deletes its scan.** The paper says original scanned documents are preserved as an audit trail.
-- [ ] **37. No server-side limit on upload size or file type.**
-- [ ] **38. No forgotten-password route** other than asking the OIC.
+> **Status, 2026-10-11.** Items 30 to 38 are done in code and covered by 22 new automated tests (85 tests in all). Details are in [SECURITY.md](SECURITY.md). Things to do once on the real system: run `python manage.py migrate`; add `DATA_ENCRYPTION_KEY` to `backend/.env` (and keep a copy of it elsewhere), then run `python manage.py encrypt_scans`. Everyone is signed out by the upgrade and signs in again.
+>
+> - **30:** After 5 wrong passwords for one username (20 from one address) within 15 minutes, sign-in is refused with `429` and a wait time, even with the right password; it frees itself. Unknown usernames count too, so the answer does not reveal which accounts exist. Failures and lockouts are in the audit log. The counts are kept in the database, so they survive restarts.
+> - **31:** A password needs 10 characters or more, letters and numbers, and must not be common, all digits, or like the username or name. The OIC's passwords (new account or reset) are temporary: the user must change theirs before anything else will work, enforced by the server for every endpoint, and by a window that cannot be closed in the app. The OIC setting their own password is not temporary.
+> - **32:** The sign-in is an HttpOnly cookie that scripts cannot read; nothing is kept in `localStorage`. Because a cookie is sent by the browser on its own, every request that changes data (and login) must carry an `X-OCRIS-Request` header, which another website cannot add, and CORS allows only the listed origin. Cookies are `Secure` when HTTPS is required, and `SameSite=None` then, so a site and a server on different domains (the cloud case) still work.
+> - **33:** Each sign-in is its own session. Signing out ends that device only; `POST /auth/logout-all/` ends all (no button for it in the app yet). Changing your password ends the other devices; an OIC reset ends all of that user's.
+> - **34:** Scans are encrypted before they are written to disk and backups are encrypted as a whole, using `DATA_ENCRYPTION_KEY` (keys can be rotated). The server will not start without a key when `DEBUG` is off. The OCR reads a scan from a temporary decrypted copy that is removed straight after. **Not covered:** MongoDB itself holds names, grades and scanned text as ordinary data; use MongoDB or disk encryption for that. **Lose the key and the files cannot be read.**
+> - **35:** `EDIT` entries keep the old and new value of every changed field and grade; `VALIDATE` keeps what the OCR read and what a person entered instead; `EDIT_USER` keeps old and new values (never passwords); `DELETE` keeps a snapshot of the record. Failed logins, lockouts, sign-outs and reset requests are logged too. Every entry is also appended to `backend/logs/audit.jsonl` before it goes into MongoDB, so the trail survives a wiped database. The file itself is plain text on the server's disk.
+> - **36:** Deleting a record keeps its scan (marked "record deleted", still downloadable and in Scan History); the audit entry holds a snapshot of the record. To remove old personal data deliberately, run `python manage.py cleanup_scans --deleted-days N`. This changes the earlier behaviour, in which delete removed the scan too.
+> - **37:** The server refuses a file over `MAX_UPLOAD_MB` (20) from the declared request size before reading the body (`413`), and checks every file on both the quality check and the upload: it must be a JPG, PNG or PDF by its first bytes, its name must agree, an image must open and be at most 120 megapixels (`400`, `413`, `415`). Refused files are never stored.
+> - **38:** **Forgot your password?** on the login screen asks the OIC for a reset. OCRIS has no email, so the request shows as "Password reset asked" beside the account on User Management, and the OIC sets a new temporary password (which clears it). The answer is the same whether or not the account exists, and requests are limited to 5 per address per 15 minutes. If the OIC forgets their own password, the person who maintains the server runs `python manage.py changepassword <username>`. Emailing a link is not possible until the system has a mail service.
+
+- [x] **30. No limit on login attempts.** A password can be guessed indefinitely.
+- [x] **31. Weak password rule.** Eight characters is the only requirement, and a temporary password does not have to be changed at first sign-in.
+- [x] **32. The login token is kept in browser storage,** where a malicious script could read it.
+- [x] **33. One token per user.** Signing out on one device signs the user out on all devices.
+- [x] **34. Scans and backups are unencrypted.**
+- [x] **35. The audit log is thin.** It records which fields changed but not the old and new values, and it is erased if the database is wiped.
+- [x] **36. Deleting a record permanently deletes its scan.** The paper says original scanned documents are preserved as an audit trail.
+- [x] **37. No server-side limit on upload size or file type.**
+- [x] **38. No forgotten-password route** other than asking the OIC.
+
+**What D leaves open** (not on the list above, found while fixing it): no two-step sign-in; MongoDB itself is not encrypted by OCRIS; the audit file can be altered by someone with access to the server's disk; no idle timeout (a session lasts 12 hours); no button for "sign out of every device"; the new screens (forced password change, forgot password, reset badge, the Audit Log's old and new values) were built and compile, and the API behind them is tested, but they were not clicked through in a browser (see item 45).
 
 ## E. Reliability and maintenance
 
-- [ ] **39. Backups are manual, and there is no restore command.**
-- [ ] **40. Abandoned uploads pile up** until someone runs the `cleanup_scans` command.
-- [ ] **41. Refreshing the page mid-upload loses the whole batch.**
-- [ ] **42. A teacher's class change needs a fresh sign-in** before the screens reflect it.
-- [ ] **43. No database indexes.**
-- [ ] **44. Printing depends on browser behaviour.** Removing the browser's header and footer, and printing a PDF scan, have not been tried on a real printer.
+> **Status, 2026-10-11.** Items 39 to 43 are done in code and covered by 11 new automated tests (96 in all). Item 44 is left open: it needs a printer. Things to do once on the real system: schedule `python manage.py maintenance` (see [INSTALLATION.md](INSTALLATION.md#scheduled-backups)); nothing else, the indexes are created by the server the first time it connects.
+>
+> - **39:** New `restore` command: `python manage.py restore <backup>` lists what a backup holds, and with `--yes` replaces the accounts, records, scans, audit log and sections with it (a `.zip.enc` needs the same key). It first backs up the current data into `backups/before-restore/`. `backup --keep N` deletes all but the newest N backups, and the new `maintenance` command does backup + keep (`BACKUP_KEEP`, 14) + cleanup of old uploads + indexes in one go, to be scheduled with Task Scheduler or cron (commands in INSTALLATION.md). OCRIS still has no scheduler of its own, so **nothing runs until the school schedules it**, and a backup on the same disk does not survive that disk. The restore is tested for the MongoDB data, scan files, an encrypted backup and a refused junk file, and the SQLite part on its own; a full restore on a second machine was not tried.
+> - **40:** The server deletes unsaved uploads older than `PENDING_SCAN_DAYS` (7; `0` turns it off), with their files, by itself: whenever someone uploads, at most once an hour per server process, and a failure never stops the upload. `cleanup_scans` still works on demand and shares the same code.
+> - **41:** A form that has been read is already stored on the server, so the Upload page now lists the user's unsaved uploads under **Unfinished uploads** and **Continue** reopens one at step 4 with the scan and everything read (new `GET /ocr/pending/` and `GET /ocr/scans/<id>/`; the reader's notes are now stored on the scan). The browser also asks before a refresh or close while a form is between step 2 and saving. **Not covered:** forms of a batch that were not uploaded yet must be chosen again, and the correction typed on step 5 before the refresh is lost (the form returns to step 4).
+> - **42:** The server never used a stale class: it reads the account on every request. The cached copy was in the browser. The app now asks `GET /auth/me/` when the window gets focus and every 3 minutes, and updates the user only if it changed, so a teacher sees the new class without signing in again; an ended session returns to the login screen (only a `401` does that).
+> - **43:** Indexes are created on records (`record_id` unique, `lrn`, school year + name, grade level, `created_at`, `scan_id`), scans (`scan_id` unique, outcome + date, uploader + outcome, grade level, date), the audit log (`timestamp`), users (`username` unique) and sections (grade level unique, section id), by `db.ensure_indexes()` the first time the server connects, and by `create_indexes`/`maintenance`. One that cannot be built is logged and skipped. **Limit:** the search box (text inside names, subjects and scanned text) and the case-insensitive section match cannot use an index, and analytics still reads the records it covers; see [DATABASE.md](DATABASE.md#indexes).
+
+- [x] **39. Backups are manual, and there is no restore command.**
+- [x] **40. Abandoned uploads pile up** until someone runs the `cleanup_scans` command.
+- [x] **41. Refreshing the page mid-upload loses the whole batch.**
+- [x] **42. A teacher's class change needs a fresh sign-in** before the screens reflect it.
+- [x] **43. No database indexes.**
+- [ ] **44. Printing depends on browser behaviour.** Removing the browser's header and footer, and printing a PDF scan, have not been tried on a real printer. The print styles already ask for no margin (`@page { margin: 0 }`) and long bond paper, but that is unconfirmed until someone prints a typed form, a scanned image and a scanned PDF on the school's printer.
 
 ## F. Verification gaps
 

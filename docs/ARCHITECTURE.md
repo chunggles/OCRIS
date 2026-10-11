@@ -6,7 +6,7 @@ OCRIS is a three-tier web application:
 
 1. A **React single-page application** in the browser.
 2. A **Django REST API** that holds the business logic and the OCR engine.
-3. **Two data stores**: SQLite for user accounts, MongoDB for records, scans and the audit log. Uploaded images are kept on the server's disk.
+3. **Two data stores**: SQLite for user accounts and sessions, MongoDB for records, scans and the audit log. Uploaded images are kept on the server's disk.
 
 ```mermaid
 flowchart LR
@@ -19,11 +19,11 @@ flowchart LR
         SVC[Services<br/>grading, storage]
     end
     TESS[Tesseract 5<br/>executable]
-    SQL[(SQLite<br/>users, tokens)]
+    SQL[(SQLite<br/>users, sessions)]
     MONGO[(MongoDB<br/>records, scans,<br/>audit_log, users)]
     DISK["media/scans<br/>uploaded images"]
 
-    UI -- "JSON over HTTP<br/>Authorization: Token" --> API
+    UI -- "JSON over HTTP<br/>HttpOnly cookie" --> API
     API --> OCR
     API --> SVC
     OCR --> TESS
@@ -34,7 +34,7 @@ flowchart LR
 
 ### Why two databases
 
-- **SQLite** holds what Django's authentication system manages: user accounts, hashed passwords and login tokens. Using Django's built-in user model gives password hashing, the admin site and token authentication without extra code.
+- **SQLite** holds what Django's authentication system manages: user accounts, hashed passwords and login sessions. Using Django's built-in user model gives password hashing, password rules and the admin site without extra code.
 - **MongoDB** holds the school data. A Form 137 record is a natural document: the set of subjects differs between forms and year levels, and each record carries a nested grade sheet. Storing it as one document avoids a fixed schema of subject columns.
 
 SQLite is the source of truth for users. A copy of each user (without the password) is mirrored to a MongoDB `users` collection for reference.
@@ -53,16 +53,17 @@ backend/
     urls.py                 /admin/ and /api/
   api/
     models.py               OCRISUser: roles, class assignment, class access check
-    authentication.py       token authentication with expiry
+    authentication.py       sign-in cookie authentication, session expiry, request-header check, temporary-password lock
+    password_validators.py  letters-and-numbers password rule
     permissions.py          IsOIC, IsOICOrAdmin
     tests.py                automated tests
-    management/commands/    backup, cleanup_scans, recompute_remarks, tidy_records
+    management/commands/    backup, restore, maintenance, create_indexes, cleanup_scans, decrypt_backup, encrypt_scans, recompute_remarks, tidy_records
     serializers.py          login, user, and validation payloads
     urls.py                 all /api/ routes
     constants.py            passing grade, N/A handling, remark names
     db.py                   every MongoDB read and write
     views/
-      auth.py               login, logout, current user, change password
+      auth.py               login, logout (one device or all), current user, change password, forgot password
       records.py            list, search, filter options, detail, create (typed-in forms), update, delete
       ocr.py                quality check, upload, validate, download, history
       analytics.py          grade analytics
@@ -71,7 +72,12 @@ backend/
       audit.py              audit log
     services/
       grading.py            builds the grade sheet, average, and remarks
-      storage.py            saves and finds uploaded files
+      storage.py            saves, finds and streams uploaded files (encrypted when a key is set)
+      crypto.py             encryption at rest for scans and backups
+      maintenance.py        removes abandoned uploads by itself (at most once an hour, when someone uploads)
+      uploads.py            file type, size and content checks on uploads
+      accounts.py           sign-in limits and password rules
+      audit.py              old and new values for audit entries
     ocr/
       engine.py             read_scan / run_ocr entry points, error handling, retry on a smoothed copy
       pdf.py                opens a scan as an image; renders the pages of a PDF
@@ -138,17 +144,18 @@ frontend/src/
 - `AppContext` holds `loggedIn`, `user`, `activePage` and `navParams`.
 - Pages change screen by calling `nav('records')` or `nav('detail', { recordId })`. `App.jsx` looks the page name up in its `PAGES` table.
 - The sidebar and the top-bar titles are both generated from `NAV_ITEMS` in `data/constants.js`. An item can list the roles allowed to see it; `App.jsx` applies the same rule to the page itself.
-- After a page refresh, `AppContext` asks the server who the stored token belongs to (`GET /auth/me/`) and restores the session, so the user stays signed in.
-- The upload wizard (`UploadPage.jsx`) keeps the data gathered so far in one object and passes it to each step.
+- When the page opens, `AppContext` asks the server who the sign-in cookie belongs to (`GET /auth/me/`) and restores the session, so the user stays signed in after a refresh. A user who still has a temporary password sees an unclosable "Choose your own password" window (`App.jsx`) until it is changed.
+- While the app is open, `AppContext` asks `GET /auth/me/` again when the window is focused and every 3 minutes, and replaces `user` only if it changed. A teacher whose class the OIC changed sees the new class without signing in again; a user whose session ended is returned to the login screen (only a `401` does that, so a server hiccup does not sign anyone out). The server never relied on the cached user: every request reads the account from the database.
+- The upload wizard (`UploadPage.jsx`) keeps the data gathered so far in one object and passes it to each step. Once a form is read, its scan and fields are also stored on the server, so `PendingUploads.jsx` can list the unsaved ones (`GET /ocr/pending/`) and restart the wizard at step 4 with `GET /ocr/scans/<id>/`. While the wizard is between step 2 and the success screen, the browser asks before the page is left or refreshed.
 
 ### Talking to the backend
 
 All requests go through `utils/api.js`, which:
 
-- adds the `Authorization: Token <token>` header from `localStorage`;
-- on a `401` response, clears the token and returns to the login screen;
+- sends every request with the sign-in cookie (`credentials: 'include'`) and the `X-OCRIS-Request` header; the cookie is HttpOnly, so the frontend never holds or stores a token;
+- on a `401` response, returns to the login screen (except for the check made when the page opens);
 - throws `{ status, data }` for HTTP errors and `{ status: 0, offline: true }` when the server cannot be reached, so pages can show a suitable message;
-- downloads files by fetching them as a blob, because a plain link cannot send the token header.
+- downloads files by fetching them as a blob, because a plain link cannot send the request header.
 
 ## 4. Main data flow: digitizing a form
 
@@ -236,7 +243,8 @@ All environment-specific settings are read from `backend/.env` and `frontend/.en
 |---|---|---|
 | `TIME_ZONE` | `Asia/Manila` | Django's time zone |
 | `TOKEN_TTL_HOURS` | 12 (from `.env`) | Hours a sign-in stays valid |
-| `DATA_UPLOAD_MAX_MEMORY_SIZE` | 20 MB | Largest accepted upload |
+| `MAX_UPLOAD_MB` | 20 (from `.env`) | Largest accepted scan; refused with `413` |
+| `AUTH_PASSWORD_VALIDATORS` | 10 characters, letters and numbers, not common, not numeric, not like the name | Password rules |
 | `OCR_LANG` | `eng` | Tesseract language |
 | `OCR_CONFIDENCE_THRESHOLD` | 90 | Auto-approval threshold used by the free-text fallback parser |
 | `PAGE_SIZE` (`api/db.py`) | 20 | Rows per page in lists |

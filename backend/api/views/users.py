@@ -1,11 +1,11 @@
-from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .. import db
-from ..models import OCRISUser
+from ..models import LoginSession, OCRISUser
 from ..permissions import IsOIC, IsOICOrAdmin
-from ..serializers import MIN_PASSWORD_LENGTH, CreateUserSerializer, UserSerializer
+from ..serializers import CreateUserSerializer, UserSerializer
+from ..services import accounts, audit
 from ..utils.http import detail, not_found
 
 
@@ -55,8 +55,10 @@ def _update_user(request, user):
     password = data.pop('password', None)
     if isinstance(password, list):  # form-encoded requests give a list
         password = password[0] if password else None
-    if password is not None and len(password) < MIN_PASSWORD_LENGTH:
-        return detail(f'The password must be at least {MIN_PASSWORD_LENGTH} characters.', 400)
+    if password is not None:
+        problems = accounts.password_problems(password, user)
+        if problems:
+            return detail(' '.join(problems), 400)
 
     s = UserSerializer(user, data=data, partial=True)
     if not s.is_valid():
@@ -66,17 +68,24 @@ def _update_user(request, user):
     if losing_oic and _is_last_active_oic(user):
         return detail('This is the only active OIC account. Make another user an OIC first.', 400)
 
+    before = {field: getattr(user, field) for field in changes}
     username_before = user.username
     s.save()
     if password is not None:
         user.set_password(password)
-        user.save(update_fields=['password'])
-        Token.objects.filter(user=user).delete()
+        # The OIC knows this password, so its owner must replace it (unless it is the OIC's own)
+        user.must_change_password = user.pk != request.user.pk
+        user.password_reset_requested_at = None
+        user.save(update_fields=['password', 'must_change_password', 'password_reset_requested_at'])
+        LoginSession.objects.filter(user=user).delete()
         db.log_action('RESET_PASSWORD', request.user.username, {'target_user': user.username})
     if changes:
         if user.username != username_before:
             db.delete_user_in_mongo(username_before)
-        db.log_action('EDIT_USER', request.user.username, {'target_user': user.username, 'fields': sorted(changes)})
+        db.log_action('EDIT_USER', request.user.username, {
+            'target_user': user.username, 'fields': sorted(changes),
+            'changes': audit.field_changes(before, changes, sorted(changes)),
+        })
     user_data = UserSerializer(user).data
     db.upsert_user_in_mongo(user_data)
     return Response(user_data)

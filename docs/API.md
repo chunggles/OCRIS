@@ -6,13 +6,9 @@ All routes are defined in `backend/api/urls.py`.
 
 ## Conventions
 
-**Authentication.** Every endpoint except login requires the header:
+**Authentication.** `POST /auth/login/` sets an **HttpOnly cookie** (`ocris_session`). Every other endpoint except `/auth/forgot-password/` needs that cookie, which the browser sends by itself; scripts on the page cannot read it. The cookie is not returned in the response body.
 
-```
-Authorization: Token <token>
-```
-
-The token is returned by `POST /auth/login/`.
+**Request header.** Every request that changes data (`POST`, `PUT`, `PATCH`, `DELETE`), including login, must carry `X-OCRIS-Request: 1`. A request without it gets `403`. Another website cannot add a custom header to a request it sends for the user, so this stops forged requests. A browser client must also send credentials (`fetch(..., { credentials: 'include' })`) and be served from an origin listed in `CORS_ALLOWED_ORIGINS`.
 
 **Format.** Requests and responses are JSON, except file uploads (`multipart/form-data`) and the file download.
 
@@ -21,11 +17,14 @@ The token is returned by `POST /auth/login/`.
 | Status | Meaning |
 |---|---|
 | 400 | Missing or invalid input |
-| 401 | No token, an invalid token, or a token older than 12 hours |
-| 403 | Logged in, but the role is not allowed, the item belongs to another class, or a teacher has no class assigned |
+| 401 | No sign-in cookie, an unknown one, or one older than 12 hours |
+| 403 | Logged in, but the role is not allowed, the item belongs to another class, a teacher has no class assigned, or the `X-OCRIS-Request` header is missing. A user who still has a temporary password gets `403` with `"code": "password_change_required"` on everything except `/auth/me/`, `/auth/change-password/` and the sign-out routes |
 | 404 | Not found |
 | 409 | The scan was already saved as a record |
+| 413 | An uploaded file is larger than `MAX_UPLOAD_MB` (20) |
+| 415 | An uploaded file is not a JPG, PNG or PDF, its name does not match its content, or it is damaged |
 | 422 | The upload was received but OCR could not read it |
+| 429 | Too many sign-in attempts or reset requests; the `Retry-After` header and the message say how long to wait |
 
 **Pagination.** Paginated lists take `?page=N` (default 1; an invalid value is treated as 1), return 20 items per page, newest first, in this shape:
 
@@ -41,10 +40,12 @@ The token is returned by `POST /auth/login/`.
 
 | Method | Path | Access | Purpose |
 |---|---|---|---|
-| POST | `/auth/login/` | Public | Log in, get a token |
-| POST | `/auth/logout/` | Any | Delete the token |
+| POST | `/auth/login/` | Public | Log in; sets the sign-in cookie |
+| POST | `/auth/logout/` | Any | Sign out of this device |
+| POST | `/auth/logout-all/` | Any | Sign out of every device |
 | GET | `/auth/me/` | Any | Current user |
 | POST | `/auth/change-password/` | Any | Change your own password |
+| POST | `/auth/forgot-password/` | Public | Ask the OIC for a new temporary password |
 | GET | `/records/` | Any (teachers: own class) | List records |
 | POST | `/records/create/` | Any (teachers: own class) | Save a record typed into the on-screen Form 137 |
 | GET | `/records/search/` | Any (teachers: own class) | Search records |
@@ -57,6 +58,8 @@ The token is returned by `POST /auth/login/`.
 | POST | `/ocr/validate/` | Any (teachers: own class) | Save a validated record |
 | GET | `/ocr/scans/<scan_id>/file/` | Any (teachers: own class) | Download the original scan |
 | GET | `/ocr/history/` | Any (teachers: own class) | List scans |
+| GET | `/ocr/pending/` | Any | Your uploads that were read but not saved yet |
+| GET | `/ocr/scans/<scan_id>/` | Any (teachers: own uploads) | One unsaved upload with what was read, to carry on from step 4 |
 | GET | `/analytics/` | Any (teachers: own class) | Grade analytics |
 | GET | `/sections/` | Any | The section tree (grade levels and their sections) |
 | POST | `/sections/create/` | OIC, Admin | Add a section |
@@ -78,34 +81,45 @@ Request:
 { "username": "k.saquing", "password": "..." }
 ```
 
-Response `200`:
+Response `200`, with the cookie in `Set-Cookie` (`HttpOnly`; `Secure` when HTTPS is required; valid 12 hours):
 
 ```json
-{
-  "token": "9944b09199c62bcf9418ad846dd0e4bbdfc6ee4b",
-  "user": { "...": "a user object, see Users below" }
-}
+{ "user": { "...": "a user object, see Users below" } }
 ```
+
+Each sign-in is its own session, so a user can be signed in on several devices at once.
 
 Response `400`: `{"non_field_errors": ["Invalid username or password."]}`
 
-Writes a `LOGIN` audit entry, records the user's last login time, and restarts the token's 12-hour clock.
+**Limit.** After `LOGIN_MAX_ATTEMPTS` (5) wrong passwords for one username, or `LOGIN_MAX_ATTEMPTS_PER_IP` (20) from one address, within `LOGIN_LOCKOUT_MINUTES` (15), the answer is `429` with `Retry-After` until the oldest of those attempts is more than 15 minutes old. While locked, even the right password is refused. A successful sign-in clears the username's failures. Usernames that do not exist are limited in the same way, so the answer does not reveal which accounts exist.
+
+Writes `LOGIN` on success; `LOGIN_FAILED` for each wrong password and `LOGIN_LOCKED` when a lock starts. A success also records the user's last login time.
 
 ### POST `/auth/logout/`
 
-Deletes the user's token. Response `200`: `{"detail": "Logged out."}`
+Ends only the session of the cookie used and removes the cookie; the user stays signed in on other devices. Response `200`: `{"detail": "Logged out."}`. Writes `LOGOUT`.
+
+### POST `/auth/logout-all/`
+
+Ends every session of the user. Response `200`. Writes `LOGOUT` with `all_devices: true`.
 
 ### GET `/auth/me/`
 
-Returns the current user as a [user object](#user-object). The frontend calls this after a page refresh to restore the session.
+Returns the current user as a [user object](#user-object). The frontend calls this when the page opens to restore the session; `401` means nobody is signed in.
+
+### POST `/auth/forgot-password/`
+
+Public. Body: `{ "username": "g.ramos" }`. OCRIS sends no email: the request marks the account, and the OIC sees "Password reset asked" beside it on User Management and sets a new temporary password. The answer is always `200` with the same message, whether or not the account exists. At most `RESET_MAX_REQUESTS` (5) requests per address per 15 minutes, then `429`. Writes `PASSWORD_RESET_REQUEST` for a real, active account.
 
 ### POST `/auth/change-password/`
 
 ```json
-{ "current_password": "...", "new_password": "at least 8 characters" }
+{ "current_password": "...", "new_password": "see the password rules" }
 ```
 
-Response `200`: `{"detail": "Password changed."}`. Response `400` if the current password is wrong, the new one is shorter than 8 characters, or it is the same as the current one. Writes a `CHANGE_PASSWORD` audit entry.
+**Password rules** (also for passwords set by the OIC): at least 10 characters; letters and numbers; not entirely numeric; not a common password; not similar to the username or name.
+
+Response `200`: `{"detail": "Password changed.", "user": {...}}`. This clears `must_change_password` and signs the user out of every other device. Response `400` if the current password is wrong, the new one breaks a rule (the messages are in `detail` and `problems`), or it is the same as the current one. Writes a `CHANGE_PASSWORD` audit entry.
 
 ---
 
@@ -198,7 +212,7 @@ When `grades` is sent, `general_average` and `remarks` are recalculated; they ca
 
 ### DELETE `/records/<record_id>/delete/`
 
-Access: OIC, Admin. Response `204` with no body. Writes a `DELETE` audit entry with the record ID and pupil name. The record's scan and its image file are deleted too.
+Access: OIC, Admin. Response `204` with no body. The record is removed, but **its scan and image file are kept**: the original form is part of the audit trail. The scan is marked `outcome: "record deleted"`. Writes a `DELETE` audit entry holding the record ID, pupil and a snapshot of what the record contained (details and grades), so it can be restored by hand. Kept scans are purged only by `manage.py cleanup_scans --deleted-days N`.
 
 ---
 
@@ -233,7 +247,7 @@ If the file is not a readable image, the response is still `200`:
 { "error": "Quality check is only available for JPG and PNG images.", "overall_ok": false, "metrics": [] }
 ```
 
-Response `400` if no file is sent.
+Response `400` if no file is sent. The file is checked as for `/ocr/upload/` below (`413`, `415`).
 
 ### POST `/ocr/upload/`
 
@@ -243,7 +257,7 @@ A teacher may only send their assigned `grade_level` and `section` (section case
 
 | Field | Required | Meaning |
 |---|---|---|
-| `file` | Yes | JPG, PNG or PDF, up to 20 MB. For a PDF, up to 4 pages are read. |
+| `file` | Yes | JPG, PNG or PDF, up to `MAX_UPLOAD_MB` (20). For a PDF, up to 4 pages are read. |
 | `pupil_name` | No | Stored on the scan |
 | `grade_level` | No | Stored on the scan |
 | `section` | No | Stored on the scan |
@@ -270,6 +284,8 @@ Response `200`:
 The meaning of each field key is in [OCR_PIPELINE.md](OCR_PIPELINE.md#7-output-format).
 
 Response `422`: `{"detail": "<reason OCR failed>"}`. No scan is created and the file is removed. The possible messages are listed in [OCR_PIPELINE.md](OCR_PIPELINE.md#8-failures).
+
+**File checks, before anything is stored.** The type is decided by the first bytes of the file, never by the name or the type the browser reports; the name must agree with it (`.jpg` or `.jpeg` for a JPEG, `.png`, `.pdf`). An image is opened to check that it is not damaged and is at most 120 megapixels. Responses: `400` no file or an empty file, `413` too large (also refused from the declared request size, before the body is read), `415` wrong or damaged type. When `DATA_ENCRYPTION_KEY` is set, the file is stored encrypted and decrypted only into a temporary folder while the OCR reads it.
 
 Response `400` if no file is sent. Writes an `UPLOAD` audit entry on success.
 
@@ -317,7 +333,7 @@ Response `200`:
 
 ### GET `/ocr/scans/<scan_id>/file/`
 
-Downloads the original uploaded image as an attachment under its original filename (`Content-Disposition`).
+Downloads the original uploaded file as an attachment under its original filename (`Content-Disposition`). An encrypted file is decrypted on the way out. The scan can still be downloaded after its record was deleted (see `outcome` in [DATABASE.md](DATABASE.md)).
 
 | Response | When |
 |---|---|
@@ -330,6 +346,20 @@ Writes a `DOWNLOAD` audit entry.
 ### GET `/ocr/history/`
 
 Paginated list of scans, without their `ocr_fields`. Teachers get the scans of their own class. The scan object is described in [DATABASE.md](DATABASE.md#scans).
+
+### GET `/ocr/pending/`
+
+The signed-in user's scans whose outcome is still `pending`, newest first, without `ocr_fields`, `ocr_text` and `notes`: `{"results": [scan, ...]}`. The Upload page lists them as "Unfinished uploads", so a refresh or a closed tab does not lose a form that was already read. Pending scans older than `PENDING_SCAN_DAYS` (7) are deleted by the server, so they do not stay here for long.
+
+### GET `/ocr/scans/<scan_id>/`
+
+What the reader found on an unsaved upload: `scan_id`, `original_name`, `pupil_name`, `lrn`, `grade_level`, `section`, `school_year`, `ocr_fields`, `notes` and `summary` (the same figures `POST /ocr/upload/` returns). The original file is fetched with `/ocr/scans/<scan_id>/file/`.
+
+| Status | Meaning |
+|---|---|
+| `403` | A teacher asking for a scan of another class, or one that someone else uploaded |
+| `404` | Unknown scan |
+| `409` | The upload was already saved as a record (or its record was deleted) |
 
 ---
 
@@ -385,11 +415,13 @@ Descriptive figures for the saved records. Optional filters: `school_year`, `gra
   "assigned_grade": "Grade 6",
   "assigned_section": "Sampaguita",
   "is_active": true,
-  "last_login": "2026-10-04T01:15:00Z"
+  "last_login": "2026-10-04T01:15:00Z",
+  "must_change_password": false,
+  "password_reset_requested_at": null
 }
 ```
 
-`role` is `OIC`, `ADMIN` or `TEACHER`.
+`role` is `OIC`, `ADMIN` or `TEACHER`. `must_change_password` is `true` after the OIC created the account or set a new password: the user must replace the temporary password before using anything else. `password_reset_requested_at` is the time of an unanswered "forgot password" request. Both are read-only.
 
 ### GET `/users/`
 
@@ -402,7 +434,7 @@ Access: OIC.
 ```json
 {
   "username": "a.reyes",
-  "password": "at least 8 characters",
+  "password": "a temporary password that follows the password rules",
   "first_name": "Ana",
   "last_name": "Reyes",
   "email": "",
@@ -413,7 +445,7 @@ Access: OIC.
 }
 ```
 
-`username` and `password` are required. `username` and `employee_id` must be unique. Response `201` with the user object. Writes a `CREATE_USER` audit entry.
+`username` and `password` are required. `username` and `employee_id` must be unique. The password must follow the password rules (`400` with `{"password": [...]}` otherwise). The new user must change it at first sign-in. Response `201` with the user object. Writes a `CREATE_USER` audit entry.
 
 ### GET `/users/<id>/`
 
@@ -423,13 +455,13 @@ Access: OIC. Returns the user object.
 
 Access: OIC. Changes any of `username`, `first_name`, `last_name`, `email`, `role`, `employee_id`, `assigned_grade`, `assigned_section`, `is_active`. Setting `is_active` to `false` deactivates the account. Returns the updated user object.
 
-Sending `password` (at least 8 characters) sets a new password and deletes the user's token, signing them out everywhere.
+Sending `password` sets a new temporary password (the password rules apply): the user is signed out everywhere, must change it at next sign-in, and any pending reset request is cleared. When the OIC sets their own password, it is not temporary.
 
-Response `400` if the change would leave the system without an active OIC, or the password is too short. Writes `EDIT_USER` and, when a password is set, `RESET_PASSWORD` audit entries.
+Response `400` if the change would leave the system without an active OIC, or the password breaks a rule. Writes `EDIT_USER` (with the old and new value of every field changed) and, when a password is set, `RESET_PASSWORD` audit entries.
 
 ### DELETE `/users/<id>/`
 
-Access: OIC. Permanently deletes the account and its token. Records, scans and audit entries are kept.
+Access: OIC. Permanently deletes the account and its sessions. Records, scans and audit entries are kept.
 
 | Response | When |
 |---|---|

@@ -3,6 +3,7 @@ import { AppProvider, useApp } from './context/AppContext'
 import Sidebar from './components/layout/Sidebar'
 import Topbar  from './components/layout/Topbar'
 import { StatusBanner } from './components/ui/index'
+import ChangePasswordModal from './components/layout/ChangePasswordModal'
 import { canOpenPage } from './data/constants'
 import LoginPage        from './pages/LoginPage'
 import DashboardPage    from './pages/DashboardPage'
@@ -33,7 +34,7 @@ const PAGES = {
 }
 
 function AppShell() {
-  const { loggedIn, restoring, user, activePage } = useApp()
+  const { loggedIn, restoring, user, setUser, activePage } = useApp()
   // On a narrow screen the menu is off-screen until opened from the top bar
   const [menuOpen, setMenuOpen] = useState(false)
   if (restoring) return <StatusBanner loading/>
@@ -47,6 +48,8 @@ function AppShell() {
         <Topbar onMenu={() => setMenuOpen(true)}/>
         <div className="page-wrap"><Page/></div>
       </div>
+      {/* A temporary password must be replaced before anything else; the server refuses all other requests until then */}
+      {user?.must_change_password && <ChangePasswordModal forced onChanged={setUser}/>}
     </div>
   )
 }

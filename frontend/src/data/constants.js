@@ -1,6 +1,12 @@
 export const ROLES = { OIC: 'OIC', ADMIN: 'ADMIN', TEACHER: 'TEACHER' }
 export const ROLE_LABELS = { OIC: 'OIC', ADMIN: 'Admin Staff', TEACHER: 'Teacher' }
 export const ROLE_OPTIONS = [ROLES.TEACHER, ROLES.ADMIN, ROLES.OIC].map(value => ({ value, label: ROLE_LABELS[value] }))
+// Password rules; the server enforces them too (and refuses common passwords)
+export const MIN_PASSWORD = 10
+export const PASSWORD_RULES = `At least ${MIN_PASSWORD} characters, with letters and numbers. Avoid common passwords and your own name.`
+export const passwordProblem = (pw) =>
+  pw.length < MIN_PASSWORD ? `The password must be at least ${MIN_PASSWORD} characters.`
+  : !(/[A-Za-z]/.test(pw) && /\d/.test(pw)) ? 'The password must contain both letters and numbers.' : null
 export const isStaffRole = (role) => role === ROLES.OIC || role === ROLES.ADMIN
 
 const STAFF = [ROLES.OIC, ROLES.ADMIN]
@@ -59,5 +65,6 @@ export const PERM_MATRIX = [
 export const AUDIT_BADGES = {
   LOGIN: 'b-blue', UPLOAD: 'b-blue', VALIDATE: 'b-green', EDIT: 'b-amber', DELETE: 'b-rose', DELETE_USER: 'b-rose',
   EDIT_USER: 'b-amber', RESET_PASSWORD: 'b-amber', CHANGE_PASSWORD: 'b-amber',
+  LOGOUT: 'b-grey', LOGIN_FAILED: 'b-rose', LOGIN_LOCKED: 'b-rose', PASSWORD_RESET_REQUEST: 'b-amber',
   ENCODE: 'b-blue', ADD_SECTION: 'b-green', EDIT_SECTION: 'b-amber', DELETE_SECTION: 'b-rose',
 }

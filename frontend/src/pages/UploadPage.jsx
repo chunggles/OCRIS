@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
 import { OCR_STEPS } from '../data/constants'
 import { PageHeader } from '../components/ui/index'
@@ -9,6 +9,7 @@ import StepExtraction from './upload/StepExtraction'
 import StepValidation from './upload/StepValidation'
 import StepConfirm    from './upload/StepConfirm'
 import StepSuccess    from './upload/StepSuccess'
+import PendingUploads from './upload/PendingUploads'
 import { pupilName }  from './upload/shared'
 
 const SUCCESS_STEP = OCR_STEPS.length + 1
@@ -25,6 +26,8 @@ export default function UploadPage() {
   const data = { ...queue[0], ...stepData }
 
   const start    = (added) => { setQueue(added.queue); setStepData({}); setStep(2) }
+  // Carry on with a form that was read earlier but never saved, from the extraction step
+  const resume   = ({ file, form, scanResult }) => { setQueue([{ file, form }]); setStepData({ scanResult }); setStep(4) }
   const goNext   = (added = {}) => { setStepData(d => ({ ...d, ...added })); setStep(s => Math.min(s + 1, SUCCESS_STEP)) }
   const goBack   = () => setStep(s => Math.max(s - 1, 1))
   const succeed  = (result) => { setSaved(list => [...list, result]); setStep(SUCCESS_STEP) }
@@ -36,6 +39,15 @@ export default function UploadPage() {
   const total     = saved.length + queue.length - (isSuccess ? 1 : 0)
   const position  = isSuccess ? saved.length : saved.length + 1
   const remaining = queue.length - 1
+
+  // Between choosing the files and saving, a refresh or closed tab would lose the work on screen
+  const working = step > 1 && !isSuccess
+  useEffect(() => {
+    if (!working) return
+    const warn = (e) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [working])
 
   const steps = {
     1: <StepPupilInfo  initial={{ queue }} onNext={start}/>,
@@ -71,6 +83,7 @@ export default function UploadPage() {
         </div>
       )}
       {steps[step]}
+      {step === 1 && <PendingUploads onResume={resume}/>}
     </div>
   )
 }

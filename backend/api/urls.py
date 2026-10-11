@@ -6,7 +6,9 @@ urlpatterns = [
     # Auth
     path('auth/login/',  auth.login_view,  name='login'),
     path('auth/logout/', auth.logout_view, name='logout'),
+    path('auth/logout-all/', auth.logout_all_view, name='logout-all'),
     path('auth/me/',     auth.me_view,     name='me'),
+    path('auth/forgot-password/', auth.forgot_password_view, name='forgot-password'),
     path('auth/change-password/', auth.change_password_view, name='change-password'),
 
     # Records ("create", "search" and "options" must come before the <record_id> routes)
@@ -22,6 +24,8 @@ urlpatterns = [
     path('ocr/quality/',                  ocr.ocr_quality,  name='ocr-quality'),
     path('ocr/upload/',                   ocr.ocr_upload,   name='ocr-upload'),
     path('ocr/validate/',                 ocr.ocr_validate, name='ocr-validate'),
+    path('ocr/pending/',                  ocr.pending_scans, name='ocr-pending'),
+    path('ocr/scans/<str:scan_id>/',      ocr.scan_detail,  name='scan-detail'),
     path('ocr/scans/<str:scan_id>/file/', ocr.scan_file,    name='scan-file'),
     path('ocr/history/',                  ocr.scan_history, name='scan-history'),
 

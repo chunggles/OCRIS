@@ -2,8 +2,7 @@ from django.contrib.auth import authenticate
 from rest_framework import serializers
 
 from .models import OCRISUser
-
-MIN_PASSWORD_LENGTH = 8
+from .services import accounts
 
 
 class LoginSerializer(serializers.Serializer):
@@ -28,15 +27,16 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'username', 'full_name', 'first_name', 'last_name', 'email', 'role', 'employee_id',
             'assigned_grade', 'assigned_section', 'is_active', 'last_login',
+            'must_change_password', 'password_reset_requested_at',
         ]
-        read_only_fields = ['last_login']
+        read_only_fields = ['last_login', 'must_change_password', 'password_reset_requested_at']
 
     def get_full_name(self, obj):
         return obj.get_full_name() or obj.username
 
 
 class CreateUserSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=MIN_PASSWORD_LENGTH)
+    password = serializers.CharField(write_only=True)
 
     class Meta:
         model = OCRISUser
@@ -45,9 +45,16 @@ class CreateUserSerializer(serializers.ModelSerializer):
             'employee_id', 'assigned_grade', 'assigned_section',
         ]
 
+    def validate(self, data):
+        problems = accounts.password_problems(data['password'], OCRISUser(
+            username=data.get('username', ''), first_name=data.get('first_name', ''), last_name=data.get('last_name', '')))
+        if problems:
+            raise serializers.ValidationError({'password': problems})
+        return data
+
     def create(self, validated_data):
         password = validated_data.pop('password')
-        user = OCRISUser(**validated_data)
+        user = OCRISUser(**validated_data, must_change_password=True)   # the temporary password must be replaced
         user.set_password(password)
         user.save()
         return user

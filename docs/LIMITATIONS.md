@@ -14,9 +14,9 @@ This document states plainly what has and has not been verified, and what the sy
 |---|---|
 | Grading | The Promoted / Retained / Incomplete rules; blank grades left out of the average |
 | Class limits | Teachers see only their own class in lists, record detail, search, analytics, scan history and downloads; a teacher with no class sees nothing |
-| Records | Search with special characters; date format; a scan cannot be saved twice; editing recalculates average and remarks; bad edits are refused; deleting a record removes its scan and image |
+| Records | Search with special characters; date format; a scan cannot be saved twice; editing recalculates average and remarks; bad edits are refused; deleting a record keeps its scan and image |
 | Accounts | Login; session expiry; changing your own password; OIC resetting a password and editing a user; protection of the last OIC |
-| Maintenance commands | `cleanup_scans`, `recompute_remarks`, `backup` |
+| Maintenance commands | `cleanup_scans`, `recompute_remarks`, `backup` (with `--keep`), `restore`, `maintenance`, `create_indexes`; resuming an unsaved upload; the automatic cleanup; the indexes |
 | File access | The uploads folder is not reachable without going through the API |
 
 There are no automated tests for the OCR modules or for the frontend.
@@ -59,10 +59,11 @@ Recorded in [CHANGELOG.md](../CHANGELOG.md).
 |---|---|---|
 | 8 | There is no check for an existing record of the same pupil and school year. | Uploading the same paper form twice creates two records. |
 | 9 | A teacher can upload a form for any grade and section. | A teacher who types a class other than their own will not see the record afterwards. |
-| 10 | The sign-in token is kept in the browser's `localStorage`. | Any script running on the page could read it. Sessions do expire after 12 hours. |
+| 10 | A sign-in lasts a fixed 12 hours from the moment of signing in; there is no idle timeout. | A computer left signed in stays open until the 12 hours run out, so staff should sign out on shared computers. |
 | 11 | A username cannot be changed from the interface. | It can be changed through the API or the Django admin site. |
-| 12 | Unfinished uploads are removed only when `cleanup_scans` is run. | Someone has to run it, or schedule it. |
-| 13 | Failed logins, sign-outs and record views are not written to the audit log. | The log shows what was changed, not every access. |
+| 12 | ~~Unfinished uploads are removed only when `cleanup_scans` is run.~~ Fixed 2026-10-11: the server removes unsaved uploads older than `PENDING_SCAN_DAYS` (7) by itself, at most once an hour, when someone uploads. | It happens only while people upload; on a server nobody uses it waits, which does no harm. `cleanup_scans` and `maintenance` do it on demand. |
+| 13 | Record views are not written to the audit log. | The log shows what was changed and who signed in, failed to sign in, or downloaded a scan, but not every record that was opened. |
+| 13a | Security gaps that remain: there is no two-step sign-in; MongoDB itself is not encrypted by OCRIS (records, names and the text read from scans sit in it as plain data, so use MongoDB encryption at rest or an encrypted disk); a scan is decrypted into a temporary folder for the 30 to 70 seconds the OCR reads it; the audit file is appended to by the server and could be altered by someone with access to the server's disk. | Protect the server, the database and the disk; keep the encryption key apart from the backups. |
 
 ### Deployment
 
@@ -70,7 +71,10 @@ Recorded in [CHANGELOG.md](../CHANGELOG.md).
 |---|---|---|
 | 14 | The backend is run with Django's development server. | Use a production WSGI server behind a web server, with HTTPS. |
 | 15 | MongoDB is used without authentication by default. | Enable MongoDB authentication and put the credentials in `MONGO_URI`. |
-| 16 | Backups are made only when `python manage.py backup` is run, and restoring is done by hand. | Schedule the backup command and rehearse a restore. |
+| 16 | Backups are still made only when something runs them: OCRIS has no scheduler. Since 2026-10-11 there is `python manage.py restore` and `python manage.py maintenance` (backup, keep the newest 14, tidy), and INSTALLATION.md shows how to schedule it. | Schedule `maintenance` on the server, copy the backups off that machine, and rehearse a restore on a copy. The restore of the accounts file, the encrypted case and the MongoDB data are tested; a full restore on a second machine has not been tried. |
+| 17 | The search box cannot use a database index (it looks for text inside names, subjects and scanned text), and the analytics page reads every record that matches its filters. | Fast enough for the thousands of records of one school; a much larger archive would need MongoDB text search and stored totals. |
+| 18 | Only the form being worked on can be picked up again after a refresh. The other forms of a batch had not been uploaded yet. | Choose them again. |
+| 19 | Printing has not been tried on a real printer. The print layout asks for no browser header or footer and for long bond paper (8.5 x 13 in), but whether a given browser and printer honour that is not confirmed, nor is printing a PDF scan. | Do a test print of a typed form, a scanned image and a scanned PDF before relying on it. |
 
 ## 3. Recommendations
 
@@ -83,4 +87,4 @@ In suggested order of priority:
 5. **Support multi-page forms**, including the back page of the SF10-ES (Grades 5 and 6), which the system has no layout for yet. (PDF files are read since 2026-10-08, first page only.)
 6. **Warn when a record for the same pupil and school year already exists.**
 7. **Move OCR to a background job** so uploads do not block the web server.
-8. **Prepare a production deployment** (items 14 to 16) and schedule `backup` and `cleanup_scans`.
+8. **Prepare a production deployment** (items 14 to 16) and schedule `maintenance`.

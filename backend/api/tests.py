@@ -10,17 +10,19 @@ from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from unittest import skipUnless
+from unittest.mock import patch
 
 from django.conf import settings
+from cryptography.fernet import Fernet
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
-from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
 from api import db
-from api.models import OCRISUser
-from api.services import grading, storage
+from api.models import AuthAttempt, LoginSession, OCRISUser
+from api.services import crypto, grading, maintenance, storage
 
 TEST_DB = f'ocris_test_{uuid.uuid4().hex[:8]}'
 PASSWORD = 'test-pass-123'
@@ -32,6 +34,13 @@ def _mongo_available():
         return True
     except Exception:
         return False
+
+
+def tiny_png():
+    from PIL import Image
+    out = BytesIO()
+    Image.new('RGB', (20, 20), 'white').save(out, 'PNG')
+    return out.getvalue()
 
 
 def _grades(**finals):
@@ -496,7 +505,7 @@ class RecordTests(ApiTestCase):
         self.assertEqual(self.as_user(self.unassigned).post('/api/ocr/validate/', other_class, format='json').status_code, 403)
 
         # An upload for another class is refused before the file is stored or read
-        upload = {'file': SimpleUploadedFile('form.png', b'image', 'image/png'), 'grade_level': 'Grade 5', 'section': 'Orchid'}
+        upload = {'file': SimpleUploadedFile('form.png', tiny_png(), 'image/png'), 'grade_level': 'Grade 5', 'section': 'Orchid'}
         self.assertEqual(client.post('/api/ocr/upload/', upload, format='multipart').status_code, 403)
         self.assertEqual(db.scans_col().count_documents({}), 2)
         self.assertFalse(storage.scans_dir().exists() and any(storage.scans_dir().iterdir()))
@@ -686,15 +695,25 @@ class RecordTests(ApiTestCase):
         self.assertEqual(client.patch(url, {'grades': {'English': {'Q9': '80'}}}, format='json').status_code, 400)
         self.assertEqual(db.get_record(record_id)['remarks'], 'Promoted')
 
-    def test_delete_removes_the_scan_and_its_file(self):
+    def test_delete_keeps_the_scan_as_an_audit_trail(self):
         scan_id = self.make_scan(with_file=True)
         path = storage.find_scan_file(db.get_scan(scan_id)['filename'])
         record_id = self.make_record(scan_id=scan_id)
         self.assertEqual(self.as_user(self.teacher).delete(f'/api/records/{record_id}/delete/').status_code, 403)
         self.assertEqual(self.as_user(self.admin).delete(f'/api/records/{record_id}/delete/').status_code, 204)
         self.assertIsNone(db.get_record(record_id))
-        self.assertIsNone(db.get_scan(scan_id))
+        scan = db.get_scan(scan_id)
+        self.assertEqual((scan['outcome'], scan['record_deleted_by']), ('record deleted', 'admin'))
+        self.assertTrue(path.exists())
+        entry = db.audit_col().find_one({'action': 'DELETE'})
+        self.assertEqual(entry['details']['record']['grades'], _grades(English='88'))   # what was deleted can be restored by hand
+        # The scan is purged only on request, once old enough
+        call_command('cleanup_scans', '--deleted-days', '30', stdout=StringIO())
+        self.assertTrue(path.exists())
+        db.scans_col().update_one({'scan_id': scan_id}, {'$set': {'record_deleted_at': datetime.utcnow() - timedelta(days=31)}})
+        call_command('cleanup_scans', '--deleted-days', '30', stdout=StringIO())
         self.assertFalse(path.exists())
+        self.assertIsNone(db.get_scan(scan_id))
 
     def test_pending_scans_are_counted(self):
         self.make_scan()
@@ -704,12 +723,16 @@ class RecordTests(ApiTestCase):
 
 
 class AccountTests(ApiTestCase):
-    def login(self, username, password=PASSWORD):
-        return APIClient().post('/api/auth/login/', {'username': username, 'password': password}, format='json')
+    def login(self, username, password=PASSWORD, client=None):
+        return (client or self.browser()).post('/api/auth/login/', {'username': username, 'password': password}, format='json')
 
-    def with_token(self, key):
-        client = APIClient()
-        client.credentials(HTTP_AUTHORIZATION=f'Token {key}')
+    def browser(self):
+        """A client that behaves like the OCRIS site: it keeps cookies and sends the request header."""
+        return APIClient(HTTP_X_OCRIS_REQUEST='1')
+
+    def signed_in(self, username, password=PASSWORD):
+        client = self.browser()
+        self.assertEqual(self.login(username, password, client).status_code, 200)
         return client
 
     def test_login_returns_user_and_records_last_login(self):
@@ -717,19 +740,22 @@ class AccountTests(ApiTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['user']['role'], 'TEACHER')
         self.assertEqual(response.data['user']['assigned_section'], 'Sampaguita')
+        self.assertNotIn('token', response.data)   # the sign-in lives in a cookie scripts cannot read
+        cookie = response.cookies[settings.AUTH_COOKIE_NAME]
+        self.assertTrue(cookie['httponly'])
         self.teacher.refresh_from_db()
         self.assertIsNotNone(self.teacher.last_login)
 
-    def test_token_expires(self):
-        key = self.login('teacher').data['token']
-        self.assertEqual(self.with_token(key).get('/api/auth/me/').status_code, 200)
-        Token.objects.filter(key=key).update(created=timezone.now() - timedelta(hours=settings.TOKEN_TTL_HOURS + 1))
-        self.assertEqual(self.with_token(key).get('/api/auth/me/').status_code, 401)
+    def test_session_expires(self):
+        client = self.signed_in('teacher')
+        self.assertEqual(client.get('/api/auth/me/').status_code, 200)
+        LoginSession.objects.update(created=timezone.now() - timedelta(hours=settings.TOKEN_TTL_HOURS + 1))
+        self.assertEqual(client.get('/api/auth/me/').status_code, 401)
         # Signing in again gives a working session
-        self.assertEqual(self.with_token(self.login('teacher').data['token']).get('/api/auth/me/').status_code, 200)
+        self.assertEqual(self.signed_in('teacher').get('/api/auth/me/').status_code, 200)
 
     def test_change_own_password(self):
-        client = self.as_user(self.teacher)
+        client = self.signed_in('teacher')
         url = '/api/auth/change-password/'
         self.assertEqual(client.post(url, {'current_password': 'wrong', 'new_password': 'new-pass-456'}, format='json').status_code, 400)
         self.assertEqual(client.post(url, {'current_password': PASSWORD, 'new_password': 'short'}, format='json').status_code, 400)
@@ -738,14 +764,14 @@ class AccountTests(ApiTestCase):
         self.assertEqual(self.login('teacher', 'new-pass-456').status_code, 200)
 
     def test_oic_resets_password_and_edits_user(self):
-        key = self.login('teacher').data['token']
+        client = self.signed_in('teacher')
         body = {'first_name': 'Gloria', 'assigned_section': 'Rosal', 'password': 'reset-pass-789'}
         self.assertEqual(self.as_user(self.admin).patch(f'/api/users/{self.teacher.pk}/', body, format='json').status_code, 403)
         response = self.as_user(self.oic).patch(f'/api/users/{self.teacher.pk}/', body, format='json')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['first_name'], 'Gloria')
         self.assertEqual(response.data['assigned_section'], 'Rosal')
-        self.assertEqual(self.with_token(key).get('/api/auth/me/').status_code, 401)  # signed out everywhere
+        self.assertEqual(client.get('/api/auth/me/').status_code, 401)  # signed out everywhere
         self.assertEqual(self.login('teacher', 'reset-pass-789').status_code, 200)
         short = self.as_user(self.oic).patch(f'/api/users/{self.teacher.pk}/', {'password': 'short'}, format='json')
         self.assertEqual(short.status_code, 400)
@@ -872,6 +898,7 @@ class CommandTests(ApiTestCase):
         self.assertEqual(db.get_record(stale)['remarks'], 'Incomplete')
         self.assertEqual(db.get_record(fine)['remarks'], 'Promoted')
 
+    @override_settings(DATA_ENCRYPTION_KEYS=[])   # a key in .env would make the backup .zip.enc
     def test_backup_writes_a_zip(self):
         self.make_record()
         self.make_scan(with_file=True)
@@ -884,3 +911,399 @@ class CommandTests(ApiTestCase):
         self.assertTrue(any(n.endswith('mongo/records.json') for n in names))
         self.assertTrue(any(n.endswith('db.sqlite3') for n in names))
         self.assertTrue(any('/scans/' in n and n.endswith('_form.png') for n in names))
+
+
+class SecurityTests(ApiTestCase):
+    """Weaknesses 30 to 38: sign-in limits, passwords, sessions, encryption, audit trail, uploads."""
+
+    def browser(self):
+        return APIClient(HTTP_X_OCRIS_REQUEST='1')
+
+    def login(self, username, password=PASSWORD, client=None):
+        return (client or self.browser()).post('/api/auth/login/', {'username': username, 'password': password}, format='json')
+
+    def signed_in(self, username, password=PASSWORD):
+        client = self.browser()
+        self.assertEqual(self.login(username, password, client).status_code, 200)
+        return client
+
+    # 30. login attempts
+    def test_repeated_wrong_passwords_lock_the_username(self):
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+            self.assertEqual(self.login('teacher', 'wrong-pass-1').status_code, 400)
+        locked = self.login('teacher')   # even the right password is refused while locked
+        self.assertEqual(locked.status_code, 429)
+        self.assertIn('Retry-After', locked)
+        self.assertEqual(self.login('admin').status_code, 200)   # other accounts are unaffected
+        self.assertEqual(db.audit_col().count_documents({'action': 'LOGIN_FAILED'}), settings.LOGIN_MAX_ATTEMPTS)
+        self.assertEqual(db.audit_col().count_documents({'action': 'LOGIN_LOCKED'}), 1)
+        AuthAttempt.objects.update(at=timezone.now() - timedelta(minutes=settings.LOGIN_LOCKOUT_MINUTES + 1))
+        self.assertEqual(self.login('teacher').status_code, 200)   # the lock ages out
+
+    def test_a_good_login_clears_earlier_failures(self):
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS - 1):
+            self.login('teacher', 'wrong-pass-1')
+        self.assertEqual(self.login('teacher').status_code, 200)
+        self.assertEqual(AuthAttempt.objects.filter(username='teacher').count(), 0)
+
+    def test_unknown_usernames_are_limited_too(self):
+        for _ in range(settings.LOGIN_MAX_ATTEMPTS):
+            self.login('nobody', 'wrong-pass-1')
+        self.assertEqual(self.login('nobody').status_code, 429)
+
+    # 31. password rules and temporary passwords
+    def test_weak_passwords_are_refused(self):
+        client = self.signed_in('teacher')
+        url = '/api/auth/change-password/'
+        for weak in ('short1', '1234567890', 'onlyletterspassword', 'password123', 'teacher12345'):
+            self.assertEqual(client.post(url, {'current_password': PASSWORD, 'new_password': weak}, format='json').status_code, 400, weak)
+        self.assertEqual(client.post(url, {'current_password': PASSWORD, 'new_password': 'Good-pass-2468'}, format='json').status_code, 200)
+
+    def test_a_temporary_password_must_be_changed_before_anything_else(self):
+        oic = self.as_user(self.oic)
+        body = {'username': 'newhire', 'password': 'abc', 'role': 'ADMIN', 'first_name': 'New', 'last_name': 'Hire'}
+        self.assertEqual(oic.post('/api/users/create/', body, format='json').status_code, 400)
+        body['password'] = 'Temp-pass-9021'
+        self.assertEqual(oic.post('/api/users/create/', body, format='json').status_code, 201)
+
+        client = self.signed_in('newhire', 'Temp-pass-9021')
+        me = client.get('/api/auth/me/')
+        self.assertEqual((me.status_code, me.data['must_change_password']), (200, True))
+        blocked = client.get('/api/records/')
+        self.assertEqual((blocked.status_code, blocked.data['code']), (403, 'password_change_required'))
+        self.assertEqual(client.post('/api/ocr/validate/', {}, format='json').status_code, 403)
+        done = client.post('/api/auth/change-password/', {'current_password': 'Temp-pass-9021', 'new_password': 'My-own-pass-77'}, format='json')
+        self.assertEqual((done.status_code, done.data['user']['must_change_password']), (200, False))
+        self.assertEqual(client.get('/api/records/').status_code, 200)
+
+    def test_a_password_set_by_the_oic_is_temporary_unless_it_is_their_own(self):
+        oic = self.as_user(self.oic)
+        oic.patch(f'/api/users/{self.teacher.pk}/', {'password': 'Reset-pass-5531'}, format='json')
+        oic.patch(f'/api/users/{self.oic.pk}/', {'password': 'Oic-own-pass-5531'}, format='json')
+        self.teacher.refresh_from_db()
+        self.oic.refresh_from_db()
+        self.assertEqual((self.teacher.must_change_password, self.oic.must_change_password), (True, False))
+        weak = oic.patch(f'/api/users/{self.teacher.pk}/', {'password': '12345678'}, format='json')
+        self.assertEqual(weak.status_code, 400)
+
+    # 32. cookie sign-in
+    def test_requests_that_change_data_need_the_site_header(self):
+        client = self.signed_in('admin')
+        forged = APIClient()
+        forged.cookies = client.cookies
+        self.assertEqual(forged.get('/api/auth/me/').status_code, 200)   # reading is harmless
+        self.assertEqual(forged.post('/api/auth/logout/').status_code, 403)
+        self.assertEqual(self.login('admin', client=forged).status_code, 403)   # nor can a site sign someone in
+        self.assertEqual(client.get('/api/auth/me/').status_code, 200)
+
+    def test_a_bad_cookie_is_just_signed_out(self):
+        client = self.browser()
+        client.cookies[settings.AUTH_COOKIE_NAME] = 'not-a-session'
+        self.assertEqual(client.get('/api/auth/me/').status_code, 401)
+        self.assertEqual(self.login('admin', client=client).status_code, 200)   # a stale cookie never blocks signing in
+
+    # 33. several devices
+    def test_signing_out_ends_only_this_device(self):
+        phone, desktop = self.signed_in('teacher'), self.signed_in('teacher')
+        self.assertEqual(phone.post('/api/auth/logout/').status_code, 200)
+        self.assertEqual(phone.get('/api/auth/me/').status_code, 401)
+        self.assertEqual(desktop.get('/api/auth/me/').status_code, 200)
+
+    def test_sign_out_everywhere_and_password_change(self):
+        phone, desktop = self.signed_in('teacher'), self.signed_in('teacher')
+        change = {'current_password': PASSWORD, 'new_password': 'Fresh-pass-3141'}
+        self.assertEqual(desktop.post('/api/auth/change-password/', change, format='json').status_code, 200)
+        self.assertEqual(phone.get('/api/auth/me/').status_code, 401)   # other devices are signed out
+        self.assertEqual(desktop.get('/api/auth/me/').status_code, 200)  # this one stays
+        self.assertEqual(desktop.post('/api/auth/logout-all/').status_code, 200)
+        self.assertEqual(desktop.get('/api/auth/me/').status_code, 401)
+        self.assertEqual(LoginSession.objects.filter(user=self.teacher).count(), 0)
+
+    # 38. forgotten password
+    def test_forgotten_password_request_reaches_the_oic(self):
+        client = self.browser()
+        known = client.post('/api/auth/forgot-password/', {'username': 'teacher'}, format='json')
+        unknown = client.post('/api/auth/forgot-password/', {'username': 'nobody'}, format='json')
+        self.assertEqual((known.status_code, unknown.status_code), (200, 200))
+        self.assertEqual(known.data, unknown.data)   # the answer does not reveal who has an account
+        self.teacher.refresh_from_db()
+        self.assertIsNotNone(self.teacher.password_reset_requested_at)
+        listed = {u['username']: u for u in self.as_user(self.oic).get('/api/users/').data}
+        self.assertIsNotNone(listed['teacher']['password_reset_requested_at'])
+        self.assertIsNone(listed['admin']['password_reset_requested_at'])
+        self.assertEqual(db.audit_col().count_documents({'action': 'PASSWORD_RESET_REQUEST'}), 1)
+
+        self.as_user(self.oic).patch(f'/api/users/{self.teacher.pk}/', {'password': 'Reset-pass-5531'}, format='json')
+        self.teacher.refresh_from_db()
+        self.assertIsNone(self.teacher.password_reset_requested_at)
+
+    def test_reset_requests_are_limited(self):
+        client = self.browser()
+        for _ in range(settings.RESET_MAX_REQUESTS):
+            self.assertEqual(client.post('/api/auth/forgot-password/', {'username': 'teacher'}, format='json').status_code, 200)
+        self.assertEqual(client.post('/api/auth/forgot-password/', {'username': 'teacher'}, format='json').status_code, 429)
+
+    # 34. encryption at rest
+    def test_scans_are_encrypted_on_disk_and_readable_through_the_app(self):
+        from cryptography.fernet import Fernet
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        content = tiny_png()
+        with self.settings(DATA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            name, path = storage.save_upload(SimpleUploadedFile('form.png', content, 'image/png'))
+            self.assertTrue(path.read_bytes().startswith(crypto.MAGIC))
+            self.assertNotIn(content[:16], path.read_bytes())
+            with storage.plain_copy(path) as readable:
+                self.assertEqual(Path(readable).read_bytes(), content)
+            self.assertFalse(Path(readable).exists())   # the temporary readable copy is gone
+
+            scan_id = db.create_scan({'filename': name, 'original_name': 'form.png', 'grade_level': 'Grade 6', 'section': 'Sampaguita'})
+            response = self.as_user(self.oic).get(f'/api/ocr/scans/{scan_id}/file/')
+            self.assertEqual(b''.join(response.streaming_content), content)
+            self.assertEqual(response['Content-Type'], 'image/png')
+            self.assertIn('attachment; filename="form.png"', response['Content-Disposition'])
+            response.close()
+
+            legacy = storage.scans_dir() / 'old_form.png'
+            legacy.write_bytes(content)   # written before encryption was switched on
+            self.assertEqual(crypto.read_plain(legacy), content)
+            out = StringIO()
+            call_command('encrypt_scans', stdout=out)
+            self.assertTrue(crypto.is_encrypted(legacy))
+            self.assertEqual(crypto.read_plain(legacy), content)
+            self.assertIn('Encrypted 1 file(s)', out.getvalue())
+
+        with self.settings(DATA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):   # a different key cannot read it
+            with self.assertRaises(crypto.CryptoError):
+                crypto.read_plain(path)
+
+    def test_a_large_file_is_encrypted_in_pieces(self):
+        from cryptography.fernet import Fernet
+        data = bytes(range(256)) * (crypto.CHUNK_SIZE // 256 * 2 + 5)
+        with self.settings(DATA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            path = Path(self.media) / 'big.bin'
+            path.write_bytes(data)
+            crypto.encrypt_file(path)
+            self.assertEqual(crypto.read_plain(path), data)
+            empty = Path(self.media) / 'empty.bin'
+            empty.write_bytes(b'')
+            crypto.encrypt_file(empty)
+            self.assertEqual(crypto.read_plain(empty), b'')
+
+    def test_keys_can_be_rotated(self):
+        from cryptography.fernet import Fernet
+        old, new = Fernet.generate_key().decode(), Fernet.generate_key().decode()
+        path = Path(self.media) / 'rotate.bin'
+        path.write_bytes(b'secret')
+        with self.settings(DATA_ENCRYPTION_KEYS=[old]):
+            crypto.encrypt_file(path)
+        with self.settings(DATA_ENCRYPTION_KEYS=[new, old]):   # the new key writes, the old one still reads
+            self.assertEqual(crypto.read_plain(path), b'secret')
+
+    def test_backup_is_encrypted_and_can_be_decrypted(self):
+        from cryptography.fernet import Fernet
+        self.make_record()
+        out = Path(self.media) / 'backups'
+        with self.settings(DATA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            call_command('backup', '--out', str(out), stdout=StringIO())
+            archives = list(out.glob('ocris-backup-*.zip.enc'))
+            self.assertEqual((len(archives), len(list(out.glob('*.zip')))), (1, 0))
+            self.assertTrue(crypto.is_encrypted(archives[0]))
+            call_command('decrypt_backup', str(archives[0]), stdout=StringIO())
+            import zipfile
+            names = zipfile.ZipFile(archives[0].with_suffix('')).namelist()
+            self.assertTrue(any(n.endswith('mongo/records.json') for n in names))
+
+    # 35. audit trail
+    def test_edits_record_old_and_new_values(self):
+        record_id = self.make_record()
+        body = {'pupil_name': 'Santos, Maria Joy', 'grades': {'English': {'Q1': '80', 'final': '70'}}}
+        self.as_user(self.admin).patch(f'/api/records/{record_id}/update/', body, format='json')
+        entry = db.audit_col().find_one({'action': 'EDIT'})['details']
+        self.assertEqual(entry['changes']['pupil_name'], {'old': 'Santos, Maria', 'new': 'Santos, Maria Joy'})
+        self.assertIn({'subject': 'English', 'period': 'final', 'old': '88', 'new': '70'}, entry['grade_changes'])
+        self.assertIn({'subject': 'English', 'period': 'Q1', 'old': 'N/A', 'new': '80'}, entry['grade_changes'])
+
+    def test_validation_records_what_the_ocr_read_and_what_replaced_it(self):
+        scan_id = self.make_scan()
+        self.as_user(self.teacher).post('/api/ocr/validate/', self.validate_payload(scan_id), format='json')
+        entry = db.audit_col().find_one({'action': 'VALIDATE'})['details']
+        self.assertEqual(entry['corrected'], [{'field': 'Mathematics Final', 'read': '?', 'new': '80'}])
+
+    def test_user_edits_record_old_and_new_values(self):
+        self.as_user(self.oic).patch(f'/api/users/{self.teacher.pk}/', {'assigned_section': 'Rosal'}, format='json')
+        entry = db.audit_col().find_one({'action': 'EDIT_USER'})['details']
+        self.assertEqual(entry['changes']['assigned_section'], {'old': 'Sampaguita', 'new': 'Rosal'})
+
+    def test_every_audit_entry_is_also_written_to_a_file(self):
+        import json
+        import logging
+        path = Path(self.media) / 'audit.jsonl'
+        handler = logging.FileHandler(path, encoding='utf-8')
+        handler.setFormatter(logging.Formatter('%(message)s'))
+        logger = logging.getLogger('ocris.audit')
+        logger.addHandler(handler)
+        self.addCleanup(handler.close)
+        self.addCleanup(logger.removeHandler, handler)
+        db.log_action('LOGIN', 'teacher', {'role': 'TEACHER'})
+        db.audit_col().delete_many({})   # the database is wiped...
+        handler.flush()
+        line = json.loads(path.read_text(encoding='utf-8').splitlines()[-1])   # ...the file still has the entry
+        self.assertEqual((line['action'], line['user'], line['details']), ('LOGIN', 'teacher', {'role': 'TEACHER'}))
+        self.assertTrue(line['timestamp'].endswith('Z'))
+
+    # 37. uploads
+    def post_file(self, name, content, url='/api/ocr/upload/'):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        data = {'file': SimpleUploadedFile(name, content), 'grade_level': 'Grade 6', 'section': 'Sampaguita'}
+        return self.as_user(self.teacher).post(url, data, format='multipart')
+
+    def test_uploads_are_checked_by_content_not_by_name(self):
+        for url in ('/api/ocr/upload/', '/api/ocr/quality/'):
+            self.assertEqual(self.post_file('form.png', b'', url).status_code, 400)                 # empty
+            self.assertEqual(self.post_file('form.png', b'<?php echo 1;', url).status_code, 415)    # not an image
+            self.assertEqual(self.post_file('form.jpg', tiny_png(), url).status_code, 415)          # a PNG named .jpg
+            self.assertEqual(self.post_file('form.exe', tiny_png(), url).status_code, 415)
+            self.assertEqual(self.post_file('form.png', tiny_png()[:40], url).status_code, 415)     # cut off
+        self.assertEqual(db.scans_col().count_documents({}), 0)
+        self.assertFalse(storage.scans_dir().exists() and any(storage.scans_dir().iterdir()))
+
+    @override_settings(MAX_UPLOAD_MB=0.0001)
+    def test_oversized_uploads_are_refused(self):
+        for url in ('/api/ocr/upload/', '/api/ocr/quality/'):
+            self.assertEqual(self.post_file('form.png', tiny_png() + b'\0' * 500, url).status_code, 413)
+        self.assertFalse(storage.scans_dir().exists() and any(storage.scans_dir().iterdir()))
+
+
+class ReliabilityTests(ApiTestCase):
+    """Weaknesses 39 to 43: restore, automatic cleanup, resuming an upload, class changes, indexes."""
+
+    def backup_file(self):
+        out = Path(self.media) / 'backups'
+        with self.settings(DATA_ENCRYPTION_KEYS=[]):
+            call_command('backup', '--out', str(out), stdout=StringIO())
+        return next(out.glob('ocris-backup-*.zip'))
+
+    def test_backup_keep_removes_the_oldest(self):
+        out = Path(self.media) / 'backups'
+        out.mkdir()
+        for stamp in ('20240101-000000', '20240102-000000', '20240103-000000'):
+            (out / f'ocris-backup-{stamp}.zip').write_bytes(b'x')
+        (out / 'notes.txt').write_text('keep me')
+        with self.settings(DATA_ENCRYPTION_KEYS=[]):
+            call_command('backup', '--out', str(out), '--keep', '2', stdout=StringIO())
+        names = sorted(f.name for f in out.iterdir())
+        self.assertEqual(len(names), 3)   # the newest two backups and the unrelated file
+        self.assertIn('notes.txt', names)
+        self.assertNotIn('ocris-backup-20240101-000000.zip', names)
+        self.assertNotIn('ocris-backup-20240102-000000.zip', names)
+
+    def test_restore_brings_back_what_was_lost(self):
+        record_id = self.make_record()
+        scan_id = self.make_scan(with_file=True)
+        scan_path = storage.find_scan_file(db.get_scan(scan_id)['filename'])
+        archive = self.backup_file()
+        db.delete_record(record_id)
+        db.delete_scan(scan_id)
+        scan_path.unlink()
+
+        with patch('api.management.commands.restore.Command._restore_accounts') as accounts:
+            call_command('restore', str(archive), stdout=StringIO())   # without --yes it only looks
+            self.assertIsNone(db.get_record(record_id))
+            accounts.assert_not_called()
+            call_command('restore', str(archive), '--yes', '--skip-safety-backup', stdout=StringIO())
+            accounts.assert_called_once()
+        self.assertEqual(db.get_record(record_id)['pupil_name'], 'Santos, Maria')
+        self.assertIsInstance(db.get_record(record_id)['created_at'], str)
+        self.assertIsNotNone(db.get_scan(scan_id))
+        self.assertTrue(scan_path.is_file())
+
+    def test_restore_refuses_a_file_that_is_not_a_backup(self):
+        junk = Path(self.media) / 'junk.zip'
+        junk.write_bytes(b'not a zip')
+        with self.assertRaises(CommandError):
+            call_command('restore', str(junk), '--yes', stdout=StringIO())
+
+    def test_restore_reads_an_encrypted_backup(self):
+        record_id = self.make_record()
+        out = Path(self.media) / 'backups'
+        with self.settings(DATA_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            call_command('backup', '--out', str(out), stdout=StringIO())
+            archive = next(out.glob('*.zip.enc'))
+            db.delete_record(record_id)
+            with patch('api.management.commands.restore.Command._restore_accounts'):
+                call_command('restore', str(archive), '--yes', '--skip-safety-backup', stdout=StringIO())
+        self.assertIsNotNone(db.get_record(record_id))
+
+    def test_abandoned_uploads_are_removed_by_themselves_once_an_hour(self):
+        old = self.make_scan(with_file=True)
+        db.scans_col().update_one({'scan_id': old}, {'$set': {'created_at': datetime.utcnow() - timedelta(days=30)}})
+        path = storage.find_scan_file(db.get_scan(old)['filename'])
+        fresh = self.make_scan()
+        maintenance.reset_schedule()
+        self.assertEqual(maintenance.cleanup_if_due(), 1)
+        self.assertIsNone(db.get_scan(old))
+        self.assertFalse(path.exists())
+        self.assertIsNotNone(db.get_scan(fresh))
+        # a second old upload is left alone until the hour is up
+        other = self.make_scan()
+        db.scans_col().update_one({'scan_id': other}, {'$set': {'created_at': datetime.utcnow() - timedelta(days=30)}})
+        self.assertEqual(maintenance.cleanup_if_due(), 0)
+        self.assertIsNotNone(db.get_scan(other))
+
+    @override_settings(PENDING_SCAN_DAYS=0)
+    def test_automatic_cleanup_can_be_switched_off(self):
+        old = self.make_scan()
+        db.scans_col().update_one({'scan_id': old}, {'$set': {'created_at': datetime.utcnow() - timedelta(days=300)}})
+        maintenance.reset_schedule()
+        self.assertEqual(maintenance.cleanup_if_due(), 0)
+        self.assertIsNotNone(db.get_scan(old))
+
+    def test_maintenance_runs_backup_cleanup_and_indexes(self):
+        out = Path(self.media) / 'backups'
+        with self.settings(DATA_ENCRYPTION_KEYS=[]):
+            call_command('maintenance', '--out', str(out), '--keep', '3', stdout=StringIO())
+        self.assertEqual(len(list(out.glob('ocris-backup-*.zip'))), 1)
+
+    def test_unsaved_uploads_can_be_listed_and_reopened(self):
+        mine = self.make_scan(uploaded_by='teacher', notes=['Page 2 was skipped.'])
+        saved = self.make_scan(uploaded_by='teacher')
+        db.mark_scan_saved(saved, 'REC-X', 0)
+        self.make_scan(uploaded_by='oic')
+        teacher = self.as_user(self.teacher)
+        listed = teacher.get('/api/ocr/pending/').data['results']
+        self.assertEqual([s['scan_id'] for s in listed], [mine])
+        scan = teacher.get(f'/api/ocr/scans/{mine}/').data
+        self.assertEqual(scan['notes'], ['Page 2 was skipped.'])
+        self.assertEqual(len(scan['ocr_fields']), 2)
+        self.assertEqual(scan['summary']['flagged'], 1)
+        self.assertEqual(teacher.get(f'/api/ocr/scans/{saved}/').status_code, 409)
+        self.assertEqual(teacher.get('/api/ocr/scans/SCAN-NONE/').status_code, 404)
+
+    def test_a_teacher_cannot_reopen_someone_elses_upload(self):
+        theirs = self.make_scan(uploaded_by='oic')
+        elsewhere = self.make_scan(grade='Grade 5', section='Rose', uploaded_by='teacher')
+        teacher = self.as_user(self.teacher)
+        self.assertEqual(teacher.get(f'/api/ocr/scans/{theirs}/').status_code, 403)
+        self.assertEqual(teacher.get(f'/api/ocr/scans/{elsewhere}/').status_code, 403)
+        self.assertEqual(self.as_user(self.oic).get(f'/api/ocr/scans/{theirs}/').status_code, 200)
+
+    def test_a_class_change_shows_on_the_next_request(self):
+        self.make_record(section='Orchid')
+        teacher = self.as_user(self.teacher)
+        self.assertEqual(teacher.get('/api/records/').data['total'], 0)
+        self.assertEqual(teacher.get('/api/auth/me/').data['assigned_section'], 'Sampaguita')
+        self.teacher.assigned_section = 'Orchid'
+        self.teacher.save()
+        self.assertEqual(teacher.get('/api/auth/me/').data['assigned_section'], 'Orchid')
+        self.assertEqual(teacher.get('/api/records/').data['total'], 1)
+
+    def test_indexes_are_created_and_repeatable(self):
+        self.assertTrue(db.ensure_indexes())
+        self.assertTrue(db.ensure_indexes())
+        records = db.get_db()['records'].index_information()
+        self.assertTrue(records['record_id_1']['unique'])
+        self.assertIn('lrn_1', records)
+        self.assertIn('outcome_1_created_at_1', db.get_db()['scans'].index_information())
+        out = StringIO()
+        call_command('create_indexes', stdout=out)
+        self.assertIn('records:', out.getvalue())

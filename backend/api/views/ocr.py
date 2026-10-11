@@ -1,4 +1,7 @@
+import mimetypes
+
 from django.http import FileResponse
+from django.utils.http import content_disposition_header
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -7,7 +10,7 @@ from .. import db
 from ..constants import PUPIL_KEYS, is_na
 from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, read_scan
 from ..serializers import ValidationSubmitSerializer
-from ..services import grading, identity, storage
+from ..services import crypto, grading, identity, maintenance, storage, uploads
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param
 
 
@@ -15,18 +18,28 @@ from ..utils.http import detail, no_class_assigned, not_found, outside_own_class
 @permission_classes([IsAuthenticated])
 def ocr_quality(request):
     """Analyse an image before OCR. Nothing is saved."""
-    file = request.FILES.get('file')
-    if not file:
-        return detail('No file provided.', 400)
+    try:
+        uploads.check_request_size(request)
+        file = request.FILES.get('file')
+        if not file:
+            return detail('No file provided.', 400)
+        uploads.check_upload(file)
+    except uploads.UploadRefused as e:
+        return detail(e.message, e.status)
     return Response(get_image_quality(file))
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def ocr_upload(request):
-    file = request.FILES.get('file')
-    if not file:
-        return detail('No file provided.', 400)
+    try:
+        uploads.check_request_size(request)
+        file = request.FILES.get('file')
+        if not file:
+            return detail('No file provided.', 400)
+        uploads.check_upload(file)
+    except uploads.UploadRefused as e:
+        return detail(e.message, e.status)
     pupil = {key: request.data.get(key, '') for key in PUPIL_KEYS}
     pupil['lrn'] = identity.clean_lrn(pupil['lrn'])
     refusal = outside_own_class(request.user, pupil)
@@ -36,14 +49,19 @@ def ocr_upload(request):
     if problem:
         return detail(problem, 400)
 
+    maintenance.cleanup_if_due()
     stored_name, path = storage.save_upload(file)
     try:
         known_sections = [section['name'] for node in db.section_tree() for section in node['sections']]
-        fields, page_text, notes = read_scan(str(path), known_sections)
+        with storage.plain_copy(path) as readable:
+            fields, page_text, notes = read_scan(str(readable), known_sections)
+            quality = get_image_quality(str(readable))
     except OCRError as e:
-        storage.discard(path)  # nothing was extracted, so don't keep the file
+        storage.discard(path)  # nothing was extracted, so do not keep the file
         return detail(str(e), 422)
-    quality = get_image_quality(str(path))
+    except crypto.CryptoError as e:
+        storage.discard(path)
+        return detail(str(e), 500)
     summary = compute_confidence_summary(fields)
 
     scan_id = db.create_scan({
@@ -54,6 +72,7 @@ def ocr_upload(request):
         'uploaded_by': request.user.username,
         'ocr_fields': fields,
         'ocr_text': page_text,
+        'notes': notes,
         'overall_conf': summary['overall_conf'],
         'flags_count': summary['flagged'],
         'null_count': summary['null_count'],
@@ -127,10 +146,17 @@ def ocr_validate(request):
         'scan_id': scan_id,
         'record_id': record_id,
         'corrections': len(corrections),
+        'corrected': _corrected_values(scan.get('ocr_fields', []), corrections),
         'pupil': pupil_name,
         'grade': data['grade_level'],
     })
     return Response({'record_id': record_id, 'pupil_name': pupil_name, 'general_average': general_average, 'remarks': remarks})
+
+
+def _corrected_values(ocr_fields, corrections):
+    """[{field, read, new}]: what the OCR read and what a person entered instead, for the audit log."""
+    read = {f.get('field'): f.get('value') for f in ocr_fields}
+    return [{'field': field, 'read': read.get(field), 'new': value} for field, value in list(corrections.items())[:200]]
 
 
 @api_view(['GET'])
@@ -153,7 +179,15 @@ def scan_file(request, scan_id):
         'filename': download_name,
         'pupil': scan.get('pupil_name', ''),
     })
-    return FileResponse(open(path, 'rb'), as_attachment=True, filename=download_name)
+    try:
+        stream = storage.open_stream(path)
+    except crypto.CryptoError as e:
+        return detail(str(e), 500)
+    # A streamed object carries no name, so Django would not set these headers itself
+    response = FileResponse(stream)
+    response['Content-Type'] = mimetypes.guess_type(download_name)[0] or 'application/octet-stream'
+    response['Content-Disposition'] = content_disposition_header(True, download_name)
+    return response
 
 
 @api_view(['GET'])
@@ -162,3 +196,28 @@ def scan_history(request):
     if request.user.missing_class:
         return no_class_assigned()
     return Response(db.list_scans(request.user.class_scope(), page=page_param(request)))
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def pending_scans(request):
+    """The signed-in user's uploads that were read but not saved yet, so a refresh does not lose them."""
+    return Response({'results': db.pending_scans_of(request.user.username)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def scan_detail(request, scan_id):
+    """What the reader found on an unsaved upload, to carry on from the extraction step."""
+    scan = db.get_scan(scan_id, fields=[
+        'scan_id', 'original_name', 'pupil_name', 'lrn', 'grade_level', 'section', 'school_year',
+        'ocr_fields', 'notes', 'outcome', 'uploaded_by', 'filename'])
+    if not scan:
+        return not_found('Scan not found.')
+    if not request.user.can_access(scan) or (request.user.is_teacher and scan.get('uploaded_by') != request.user.username):
+        return detail('You can only open your own uploads.', 403)
+    if scan.get('outcome') != 'pending':
+        return detail('This upload was already finished.', 409)
+    scan['summary'] = compute_confidence_summary(scan.get('ocr_fields', []))
+    scan['notes'] = scan.get('notes', [])
+    return Response(scan)

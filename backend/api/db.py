@@ -1,20 +1,24 @@
 """MongoDB access for records, scans, the audit log, the section tree, and the users mirror."""
+import json
 import logging
 import re
 import uuid
 from datetime import datetime
 
 from django.conf import settings
-from pymongo import DESCENDING, MongoClient
+from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo.errors import ConnectionFailure, PyMongoError
 
 from .constants import GRADE_LEVELS, PASSING_GRADE, is_na
 
 logger = logging.getLogger(__name__)
+audit_logger = logging.getLogger('ocris.audit')
 
 PAGE_SIZE = 20
-DATE_FIELDS = ('created_at', 'updated_at', 'timestamp', 'synced_at')
+DATE_FIELDS = ('created_at', 'updated_at', 'timestamp', 'synced_at', 'record_deleted_at')
 
 _client = None
+_indexed = set()   # databases whose indexes have been created in this process
 
 
 # ── Connection ───────────────────────────────────────────────────────────────
@@ -27,7 +31,58 @@ def get_client():
 
 
 def get_db():
-    return get_client()[settings.MONGO_DB_NAME]
+    database = get_client()[settings.MONGO_DB_NAME]
+    if settings.MONGO_DB_NAME not in _indexed:
+        if ensure_indexes(database):
+            _indexed.add(settings.MONGO_DB_NAME)
+    return database
+
+
+# Without these every lookup reads the whole collection. Unique ones also stop a duplicate id
+# being stored. Sections are matched case-insensitively with a regex, which an index cannot
+# speed up, so the class filter is indexed on the grade level and the rest is checked after it.
+INDEXES = {
+    'records': [
+        ([('record_id', ASCENDING)], {'unique': True}),
+        ([('lrn', ASCENDING)], {}),
+        ([('school_year', ASCENDING), ('pupil_name', ASCENDING)], {}),
+        ([('grade_level', ASCENDING), ('created_at', DESCENDING)], {}),
+        ([('created_at', DESCENDING)], {}),
+        ([('scan_id', ASCENDING)], {}),
+    ],
+    'scans': [
+        ([('scan_id', ASCENDING)], {'unique': True}),
+        ([('outcome', ASCENDING), ('created_at', ASCENDING)], {}),
+        ([('uploaded_by', ASCENDING), ('outcome', ASCENDING)], {}),
+        ([('grade_level', ASCENDING), ('created_at', DESCENDING)], {}),
+        ([('created_at', DESCENDING)], {}),
+    ],
+    'audit_log': [([('timestamp', DESCENDING)], {})],
+    'users': [([('username', ASCENDING)], {'unique': True})],
+    'grade_levels': [
+        ([('grade_level', ASCENDING)], {'unique': True}),
+        ([('sections.section_id', ASCENDING)], {}),
+    ],
+}
+
+
+def ensure_indexes(database=None):
+    """
+    Create the indexes above if they are missing (safe to repeat). One that cannot be built, for
+    example a unique one over data that already has duplicates, is logged and skipped. Returns
+    False only when MongoDB could not be reached, so the next call tries again.
+    """
+    database = database if database is not None else get_db()
+    for name, specs in INDEXES.items():
+        for keys, options in specs:
+            try:
+                database[name].create_index(keys, **options)
+            except ConnectionFailure as e:
+                logger.warning(f'Indexes not created, MongoDB is not reachable: {e}')
+                return False
+            except PyMongoError as e:
+                logger.warning(f'Index {name}{keys} could not be created: {e}')
+    return True
 
 
 def records_col():
@@ -244,6 +299,7 @@ def create_scan(data):
         'lrn':               data.get('lrn', ''),
         'ocr_fields':        data.get('ocr_fields', []),
         'ocr_text':          data.get('ocr_text', ''),   # everything read off the page, for searching
+        'notes':             data.get('notes', []),      # remarks the reader made, shown again when an upload is resumed
         'overall_conf':      data.get('overall_conf', 0),
         'flags_count':       data.get('flags_count', 0),
         'corrections_count': 0,
@@ -276,9 +332,30 @@ def count_pending_scans(filters=None):
     return scans_col().count_documents({**_query(filters), 'outcome': 'pending'})
 
 
+def pending_scans_of(username):
+    """The unsaved uploads of a user, newest first: what they can pick up again after a refresh."""
+    return _serialize(list(scans_col().find(
+        {'uploaded_by': username, 'outcome': 'pending'},
+        {'_id': 0, 'ocr_fields': 0, 'ocr_text': 0, 'notes': 0}).sort('created_at', DESCENDING)))
+
+
 def pending_scans_before(cutoff):
     """Scans uploaded before cutoff that were never saved as a record."""
     return list(scans_col().find({'outcome': 'pending', 'created_at': {'$lt': cutoff}}, {'_id': 0, 'ocr_fields': 0, 'ocr_text': 0}))
+
+
+def mark_scan_record_deleted(scan_id, deleted_by):
+    """Keep the scan after its record was deleted: the original form stays as part of the audit trail."""
+    scans_col().update_one({'scan_id': scan_id}, {'$set': {
+        'outcome': 'record deleted',
+        'record_deleted_by': deleted_by,
+        'record_deleted_at': datetime.utcnow(),
+    }})
+
+
+def deleted_record_scans_before(cutoff):
+    """Scans kept after their record was deleted, whose record was deleted before cutoff."""
+    return list(scans_col().find({'outcome': 'record deleted', 'record_deleted_at': {'$lt': cutoff}}, {'_id': 0, 'ocr_fields': 0, 'ocr_text': 0}))
 
 
 def delete_scan(scan_id):
@@ -288,12 +365,16 @@ def delete_scan(scan_id):
 # ── Audit log ────────────────────────────────────────────────────────────────
 
 def log_action(action, user, details=None):
-    audit_col().insert_one({
-        'action': action,
-        'user': user,
-        'details': details or {},
-        'timestamp': datetime.utcnow(),
-    })
+    """
+    Record an action. It is appended to the audit file first, so the entry survives even if
+    the database is unreachable, wiped or replaced; then it is stored for the Audit Log page.
+    """
+    entry = {'action': action, 'user': user, 'details': details or {}, 'timestamp': datetime.utcnow()}
+    try:
+        audit_logger.info(json.dumps({**entry, 'timestamp': entry['timestamp'].isoformat() + 'Z'}, default=str, ensure_ascii=False))
+    except Exception as e:  # a full disk must not stop the action being audited in the database
+        logger.error(f'Audit file could not be written: {e}')
+    audit_col().insert_one(entry)
 
 
 def list_audit(page=1, size=PAGE_SIZE):

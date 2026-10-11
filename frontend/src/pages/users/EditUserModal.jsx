@@ -1,12 +1,11 @@
 import { useState } from 'react'
-import { GRADE_LEVELS, ROLES } from '../../data/constants'
+import { GRADE_LEVELS, ROLES, PASSWORD_RULES, passwordProblem } from '../../data/constants'
 import { Btn, FormGroup, Notice } from '../../components/ui/index'
 import { usersAPI } from '../../utils/api'
 import RoleSelect from './RoleSelect'
 import ClassFields from './ClassFields'
 
 const CLOSE_DELAY_MS = 700
-const MIN_PASSWORD = 8
 
 // First error message in an API error body: {detail: "..."} or {field: ["..."]}
 const firstError = (data) => data?.detail || Object.values(data || {}).flat()[0]
@@ -31,7 +30,8 @@ export default function EditUserModal({ user, onClose, onSaved }) {
 
   const handleSave = async () => {
     if (isTeacher && !form.section.trim()) { setError('A teacher needs an assigned section.'); return }
-    if (form.password && form.password.length < MIN_PASSWORD) { setError(`The new password must be at least ${MIN_PASSWORD} characters.`); return }
+    const weak = form.password && passwordProblem(form.password)
+    if (weak) { setError(weak); return }
     setLoading(true); setError('')
     try {
       await usersAPI.update(user.id, {
@@ -83,7 +83,8 @@ export default function EditUserModal({ user, onClose, onSaved }) {
         </FormGroup>
         <FormGroup label="New password (leave blank to keep the current one)">
           <input className="fld" type="password" value={form.password} onChange={e => set('password', e.target.value)}
-            placeholder={`Min. ${MIN_PASSWORD} characters`} autoComplete="new-password"/>
+            placeholder="Temporary password" autoComplete="new-password"/>
+          <div className="text-muted" style={{ fontSize: 11, marginTop: 4 }}>{PASSWORD_RULES} They must change it at next sign-in, and are signed out everywhere.</div>
         </FormGroup>
 
         <div className="btn-row" style={{ marginTop: 16 }}>

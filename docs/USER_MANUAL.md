@@ -28,19 +28,29 @@ OCRIS turns a scanned Form 137 into a digital record. You upload the scan, the s
 2. Type your **username** and **password**.
 3. Click **Sign in to OCRIS**, or press Enter.
 
-If you see "Invalid username or password", check your typing. If you see "Can't reach the server", OCRIS is not running; tell the person who maintains it.
+If you see "Invalid username or password", check your typing. After **5 wrong passwords** the username is locked and the screen says how many minutes to wait (up to 15); it unlocks by itself, and even the right password is refused until then. If you see "Can't reach the server", OCRIS is not running; tell the person who maintains it.
 
-To sign out, click **Sign out** at the top right. Always sign out on a shared computer.
+**First sign-in.** When the OIC creates your account or gives you a new password, it is a **temporary password**. After you sign in, a window "Choose your own password" opens and nothing else works until you replace it.
 
-You stay signed in if you refresh the page, but an upload in progress is lost, so **do not refresh in the middle of an upload**. After 12 hours you are asked to sign in again.
+To sign out, click **Sign out** at the top right. Always sign out on a shared computer. This signs you out of that computer only; you stay signed in on your other devices.
+
+You stay signed in if you refresh the page. Refreshing in the middle of an upload does not lose a form that was already read: see **Unfinished uploads** under Step 1. After 12 hours you are asked to sign in again.
 
 ### Changing your password
 
 1. Click **Change password** at the top right.
-2. Type your current password, then the new one twice. Use at least 8 characters.
+2. Type your current password, then the new one twice.
 3. Click **Change password**.
 
-Change the temporary password you were given the first time you sign in. If you forget your password, ask the OIC to set a new one for you.
+A good password has **at least 10 characters with both letters and numbers**, is not a common password (such as "password123") and does not contain your name or username. Changing your password signs you out of your other devices.
+
+### If you forget your password
+
+1. On the login screen click **Forgot your password?**.
+2. Type your username and click **Ask the OIC to reset my password**.
+3. The screen always answers that the OIC has been told, whether or not the username exists. OCRIS sends no email: the OIC sees "Password reset asked" beside your name in User Management and gives you a new temporary password in person.
+
+If the OIC forgets their own password, the person who maintains the server resets it (see the Installation guide).
 
 ## 2. The screen layout
 
@@ -118,6 +128,8 @@ Each form is one image, up to 20 MB. You can upload up to 30 forms of the same c
 4. Click **Next**.
 
 Type these details carefully. **The saved record uses what you type here**, not what the system reads from the scan.
+
+**Unfinished uploads.** Below the upload box, a card lists your forms that were read but never saved, for example because the page was refreshed or the browser was closed. Click **Continue** to pick one up at step 4 (Extraction), with the scan and everything it read. The forms are kept for 7 days and then removed. Only the form that was being worked on can be resumed: the others in a batch had not been uploaded yet, so choose them again. While you are between step 2 and the end, the browser also asks you to confirm before it lets you leave or refresh the page.
 
 With more than one form, steps 2 to 6 run for the first form, then the next, in the order of the list. A bar under the step tabs shows which form you are on, for example "Form 2 of 5". To drop a form partway, go back to step 1 and remove it.
 
@@ -236,7 +248,7 @@ A list of saved records, newest first, 20 per page.
 - **Filters:** choose a grade, section or school year. The list updates immediately. **Clear** removes the filters.
 - **View:** opens the record.
 - **Download:** saves the original scanned image to your computer.
-- **Delete** (OIC and Admin Staff): permanently removes the record and its scanned form after you confirm. This cannot be undone.
+- **Delete** (OIC and Admin Staff): permanently removes the record after you confirm. This cannot be undone. The **scanned form is kept** as part of the audit trail (it still shows in Scan History as "record deleted"), and the Audit Log keeps a copy of what the record contained.
 - **Upload new:** goes to the upload page.
 
 Teachers see only the records of their assigned grade and section.
@@ -333,18 +345,20 @@ For the Officer in Charge. Admin Staff can view the list but cannot change it.
 1. Fill in **Last name**, **First name** and **Username / Employee ID**.
 2. Choose the **Role**.
 3. For a Teacher, choose the **Assigned grade** and **Assigned section**. This decides which records the teacher can see.
-4. Type a **Temporary password** of at least 8 characters.
+4. Type a **Temporary password**: at least 10 characters, with letters and numbers, and not a common password.
 5. Click **Create account**.
 
-Give the username and temporary password to the user privately.
+Give the username and temporary password to the user privately. They must replace it when they first sign in.
 
 ### Edit a user
 
 Click **Edit** to change a user's name, role, assigned grade and section, or account status, then **Save changes**.
 
-To give a user a new password, type it in **New password**. The user is signed out everywhere and signs in with the new password. Leave the box empty to keep the current password.
+To give a user a new password, type it in **New password**. It is a temporary password: the user is signed out everywhere, signs in with it, and must choose their own straight away. Leave the box empty to keep the current password.
 
-A teacher shown as "No class assigned" cannot see any records until you assign a grade and section.
+A "Password reset asked" mark beside a user means they used **Forgot your password?**. Setting a new password for them clears the mark.
+
+A teacher shown as "No class assigned" cannot see any records until you assign a grade and section. A change to a teacher's class takes effect for them without signing in again: their screens pick it up within about 3 minutes, or at once when they click back into the browser window (the server applies it from their next request).
 
 ### Deactivate or delete
 
@@ -367,15 +381,19 @@ For OIC and Admin Staff. A list of actions, newest first, with who did each one 
 | Action | Meaning |
 |---|---|
 | LOGIN | Someone signed in |
+| LOGIN_FAILED | A wrong username or password was typed (the name typed and the computer's address are shown) |
+| LOGIN_LOCKED | Too many wrong passwords locked a username for a while |
+| LOGOUT | Someone signed out |
+| PASSWORD_RESET_REQUEST | A user asked the OIC for a new password |
 | UPLOAD | A scan was uploaded and read |
 | VALIDATE | A record was saved |
 | ENCODE | A record was typed in on the Fill Out Form 137 page |
-| EDIT | A record was changed |
-| DELETE | A record was deleted |
+| EDIT | A record was changed. The details show each changed value, old then new (for example `final: 70 → 75`) |
+| DELETE | A record was deleted. The details keep what it contained; its scan is kept |
 | DOWNLOAD | An original scan was downloaded |
 | CREATE_USER | An account was created |
 | DELETE_USER | An account was deleted |
-| EDIT_USER | An account was changed |
+| EDIT_USER | An account was changed. The details show old and new values (never passwords) |
 | RESET_PASSWORD | The OIC set a new password for a user |
 | CHANGE_PASSWORD | A user changed their own password |
 | ADD_SECTION | A section was added |
@@ -385,7 +403,10 @@ For OIC and Admin Staff. A list of actions, newest first, with who did each one 
 ## 13. Common questions and problems
 
 **I was signed out while working.**
-A sign-in lasts 12 hours. Sign in again. An unfinished upload has to be started again.
+A sign-in lasts 12 hours. Sign in again. Open the Upload page and click **Continue** under **Unfinished uploads** to pick up a form that was already read. If you changed your password on another device, you are signed out here too.
+
+**The upload says "Only JPG, PNG and PDF files are accepted", "The file's name does not match its content" or "The file is too large".**
+OCRIS checks what the file really is, not just its name. Save or scan the form again as JPG, PNG or PDF, under 20 MB, without renaming a file to a different type.
 
 **Almost every grade was flagged.**
 The scan is probably low quality, or the grades are handwritten. Handwritten grades are flagged on purpose so that a person checks them. Rescanning at 300 DPI on a flatbed scanner gives the best result.

@@ -15,6 +15,12 @@ const describe = (d = {}) => [
   d.deleted_user && `Deleted user: ${d.deleted_user} (${d.role})`,
   d.target_user && `User: ${d.target_user}`,
   d.fields && `Changed: ${d.fields.join(', ')}`,
+  ...Object.entries(d.changes || {}).map(([field, v]) => `${field}: "${v.old ?? ''}" → "${v.new ?? ''}"`),
+  ...(d.grade_changes || []).map(g => `${g.subject} ${g.period}: ${g.old ?? '(none)'} → ${g.new ?? '(removed)'}`),
+  ...(d.corrected || []).map(c => `${c.field}: read ${c.read ?? '?'} → ${c.new}`),
+  d.ip && `From: ${d.ip}`,
+  d.scan_kept && 'Scan kept',
+  d.record && `Deleted: ${d.record.pupil_name} (${Object.keys(d.record.grades || {}).length} subjects)`,
   d.confidence !== undefined && `Conf: ${d.confidence}%`,
   d.corrections !== undefined && `Corrections: ${d.corrections}`,
 ].filter(Boolean).join(' · ')
@@ -52,7 +58,7 @@ export default function AuditPage() {
                       <td><Badge type={AUDIT_BADGES[r.action] || 'b-grey'}>{r.action}</Badge></td>
                       <td style={{ fontWeight: 500, color: 'var(--text)' }}>{r.user || '—'}</td>
                       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{formatDateTime(r.timestamp)}</td>
-                      <td className="text-muted" style={{ fontSize: 11 }}>{describe(d) || '—'}</td>
+                      <td className="text-muted" style={{ fontSize: 11, maxWidth: 420 }} title={describe(d)}>{describe(d) || '—'}</td>
                       <td className="mono" style={{ fontSize: 10 }}>{d.record_id || d.scan_id || '—'}</td>
                     </tr>
                   )

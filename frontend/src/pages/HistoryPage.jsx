@@ -5,7 +5,7 @@ import { ocrAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { formatDateTime } from '../utils/format'
 
-const OUTCOME_BADGES = { saved: 'b-green', rejected: 'b-rose' }
+const OUTCOME_BADGES = { saved: 'b-green', rejected: 'b-rose', 'record deleted': 'b-grey' }
 
 const confidenceColor = (conf) => {
   if (conf === undefined || conf === null) return 'text-3'

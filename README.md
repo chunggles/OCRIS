@@ -24,7 +24,8 @@ OCRIS turns scanned paper **Form 137** permanent records into searchable digital
 - **Stores and finds records.** Records can be listed, filtered, searched and opened, and the original scan can be downloaded.
 - **Reports on grades.** Shows class means by subject, pass rates by grade level, and flags subjects whose mean falls below 75.
 - **Controls access.** Three roles (Officer in Charge, Admin Staff, Teacher) with different permissions. Teachers are limited to their assigned class.
-- **Keeps an audit trail.** Logins, uploads, validations, edits, deletions and downloads are logged.
+- **Keeps an audit trail.** Logins (and failed ones), uploads, validations, edits with their old and new values, deletions and downloads are logged, and each entry is also written to a file that survives a database wipe. The scan of a deleted record is kept.
+- **Protects personal data.** Sign-in is an HttpOnly cookie with a limit on wrong passwords; temporary passwords must be changed at first sign-in; uploaded scans and backups are encrypted at rest; uploads are checked by content and size.
 
 ## Technology
 
@@ -34,7 +35,7 @@ OCRIS turns scanned paper **Form 137** permanent records into searchable digital
 | Backend | Python, Django 4.2, Django REST Framework 3.15 |
 | OCR | Tesseract 5 through `pytesseract`, image processing with Pillow |
 | Record storage | MongoDB (records, scans, audit log) through `pymongo` |
-| Account storage | SQLite (user accounts and login tokens) |
+| Account storage | SQLite (user accounts and login sessions) |
 | Authentication | Token authentication (DRF `authtoken`) |
 
 ## Quick start

@@ -1,28 +1,22 @@
 // HTTP client for the Django API. Errors are thrown as { status, data } or { status: 0, offline: true }.
 const BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
-const TOKEN_KEY = 'ocris_token'
 
-const token = {
-  get:   ()  => localStorage.getItem(TOKEN_KEY),
-  save:  (t) => localStorage.setItem(TOKEN_KEY, t),
-  clear: ()  => localStorage.removeItem(TOKEN_KEY),
-}
-
-const authHeader = () => {
-  const t = token.get()
-  return t ? { Authorization: `Token ${t}` } : {}
-}
+// The sign-in is an HttpOnly cookie set by the server: scripts on the page can never read it.
+// Every request sends it (credentials: 'include') and carries a header no other website can add,
+// which the server requires on requests that change data.
+const REQUEST_HEADER = { 'X-OCRIS-Request': '1' }
 
 const qs = (params = {}) => new URLSearchParams(params).toString()
 
-async function send(path, opts = {}) {
+// With `quiet401`, a 401 is returned to the caller instead of sending the user to the login screen
+async function send(path, { quiet401, ...opts } = {}) {
   let res
   try {
-    res = await fetch(`${BASE}${path}`, { ...opts, headers: { ...authHeader(), ...opts.headers } })
+    res = await fetch(`${BASE}${path}`, { ...opts, credentials: 'include', headers: { ...REQUEST_HEADER, ...opts.headers } })
   } catch {
     throw { status: 0, offline: true }
   }
-  if (res.status === 401) { token.clear(); window.location.href = '/' }
+  if (res.status === 401 && !quiet401) window.location.href = '/'
   return res
 }
 
@@ -35,7 +29,7 @@ async function request(path, opts = {}) {
 
 const withBody = (method, body) => ({ method, body: JSON.stringify(body) })
 
-// Auth is a header token, so a plain <a href> can't download — fetch as a blob and save it
+// Downloads need the sign-in cookie and header, so a plain link will not do: fetch as a blob and save it
 async function saveBlobResponse(res, fallbackName) {
   const cd   = res.headers.get('Content-Disposition') || ''
   const m    = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i)
@@ -47,20 +41,24 @@ async function saveBlobResponse(res, fallbackName) {
 }
 
 export const authAPI = {
-  login: async (username, password) => {
-    const data = await request('/auth/login/', withBody('POST', { username, password }))
-    token.save(data.token)
-    return data.user
+  login: async (username, password) => (await request('/auth/login/', withBody('POST', { username, password }))).user,
+  logout:    () => request('/auth/logout/', { method: 'POST' }).catch(() => {}),
+  logoutAll: () => request('/auth/logout-all/', { method: 'POST' }).catch(() => {}),
+  // The user of the sign-in cookie if there is a live one; null when signed out. Never redirects.
+  restore: async () => {
+    const res = await send('/auth/me/', { quiet401: true })
+    return res.ok ? res.json() : null
   },
-  logout: async () => {
-    await request('/auth/logout/', { method: 'POST' }).catch(() => {})
-    token.clear()
+  // Like restore, but only a 401 means signed out; any other failure throws, so a hiccup does not sign anyone out
+  refresh: async () => {
+    const res = await send('/auth/me/', { quiet401: true })
+    if (res.status === 401) return null
+    if (!res.ok) throw { status: res.status }
+    return res.json()
   },
-  me: () => request('/auth/me/'),
-  // True when a token from an earlier sign-in is still stored (it may have expired)
-  hasSession: () => Boolean(token.get()),
   changePassword: (current_password, new_password) =>
     request('/auth/change-password/', withBody('POST', { current_password, new_password })),
+  forgotPassword: (username) => request('/auth/forgot-password/', withBody('POST', { username })),
 }
 
 export const recordsAPI = {
@@ -86,6 +84,9 @@ async function postFile(path, file, fields = {}) {
 export const ocrAPI = {
   checkQuality: (file)            => postFile('/ocr/quality/', file),
   upload:       (file, pupilInfo) => postFile('/ocr/upload/', file, pupilInfo),
+  // Uploads that were read but not saved, and one of them with what was read, to carry on from step 4
+  pending:  ()         => request('/ocr/pending/'),
+  scan:     (scanId)   => request(`/ocr/scans/${encodeURIComponent(scanId)}/`),
   validate: (payload)  => request('/ocr/validate/', withBody('POST', payload)),
   history:  (page = 1) => request(`/ocr/history/?${qs({ page })}`),
   // The original uploaded file as a Blob, for showing or printing it in the page

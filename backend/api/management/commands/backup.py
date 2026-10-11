@@ -1,4 +1,4 @@
-"""Copy everything OCRIS stores into one dated zip file."""
+"""Copy everything OCRIS stores into one dated zip file, encrypted when DATA_ENCRYPTION_KEY is set."""
 import shutil
 import sqlite3
 import tempfile
@@ -7,10 +7,10 @@ from pathlib import Path
 
 from bson import json_util
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from api import db
-from api.services import storage
+from api.services import crypto, storage
 
 COLLECTIONS = ('records', 'scans', 'audit_log', 'users', 'grade_levels')
 
@@ -20,8 +20,10 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument('--out', default=str(Path(settings.BASE_DIR) / 'backups'), help='Folder to write the zip into.')
+        parser.add_argument('--keep', type=int, default=None,
+                            help='Afterwards delete all but the newest N backup files in that folder (default: keep all).')
 
-    def handle(self, *args, out, **options):
+    def handle(self, *args, out, keep=None, **options):
         out_dir = Path(out)
         out_dir.mkdir(parents=True, exist_ok=True)
         name = f"ocris-backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -55,5 +57,24 @@ class Command(BaseCommand):
                 count = sum(1 for f in (staging / 'scans').iterdir() if f.is_file())
             self.stdout.write(f'  scans: {count} file(s)')
 
-            archive = shutil.make_archive(str(out_dir / name), 'zip', root_dir=tmp, base_dir=name)
+            archive = Path(shutil.make_archive(str(out_dir / name), 'zip', root_dir=tmp, base_dir=name))
+        if crypto.enabled():
+            # The zip holds names, grades and password hashes, so it is encrypted as a whole
+            crypto.encrypt_file(archive)
+            archive = archive.rename(archive.with_name(archive.name + '.enc'))
+            self.stdout.write('  encrypted with DATA_ENCRYPTION_KEY (read it back with: manage.py decrypt_backup <file>)')
+        else:
+            self.stdout.write(self.style.WARNING('  NOT encrypted: DATA_ENCRYPTION_KEY is not set.'))
         self.stdout.write(f'Backup written to {archive}')
+        if keep is not None:
+            self.prune(out_dir, keep)
+
+    def prune(self, folder, keep):
+        '''Delete the oldest backups so that only the newest `keep` remain (the names sort by date).'''
+        if keep < 1:
+            raise CommandError('--keep must be at least 1.')
+        found = sorted(f for f in folder.iterdir()
+                       if f.is_file() and f.name.startswith('ocris-backup-') and f.name.endswith(('.zip', '.zip.enc')))
+        for old in found[:-keep]:
+            old.unlink()
+            self.stdout.write(f'  removed old backup {old.name}')

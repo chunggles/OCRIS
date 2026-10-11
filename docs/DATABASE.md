@@ -4,7 +4,7 @@ OCRIS uses two databases and a file folder.
 
 | Store | Holds | Defined in |
 |---|---|---|
-| SQLite (`backend/db.sqlite3`) | User accounts, login tokens | `backend/api/models.py`, Django migrations |
+| SQLite (`backend/db.sqlite3`) | User accounts, login sessions, sign-in attempts | `backend/api/models.py`, Django migrations |
 | MongoDB (database named by `MONGO_DB_NAME`) | `records`, `scans`, `audit_log`, `users`, `grade_levels` (the section tree; see [API.md](API.md#sections)) | `backend/api/db.py` |
 | File system (`backend/media/scans/`) | Uploaded scan images | `backend/api/services/storage.py` |
 
@@ -14,7 +14,7 @@ MongoDB does not enforce relationships. The links below are kept by the applicat
 
 ```mermaid
 erDiagram
-    OCRIS_USERS ||--o| AUTHTOKEN_TOKEN : "has login token"
+    OCRIS_USERS ||--o{ OCRIS_LOGIN_SESSIONS : "signed in on"
     OCRIS_USERS ||--o{ SCANS : "uploaded_by (username)"
     OCRIS_USERS ||--o{ RECORDS : "uploaded_by (username)"
     OCRIS_USERS ||--o{ AUDIT_LOG : "user (username)"
@@ -123,11 +123,13 @@ One document per successful OCR run. Created by `POST /api/ocr/upload/`.
 | `lrn` | string | As typed at upload | |
 | `ocr_fields` | array | Everything OCR read, see below | |
 | `ocr_text` | string | All the text read off the page, up to 20,000 characters; used by search. Scans uploaded before 2026-10-10 do not have it. | |
+| `notes` | array of strings | Remarks the reader made about the scan (a page skipped, a block named from the others). Kept so an upload that is resumed shows them again. Scans uploaded before 2026-10-11 have none. | |
 | `overall_conf` | number | Mean confidence of fields with a confidence above 0 | `88.4` |
 | `flags_count` | integer | Fields flagged for review | `14` |
 | `null_count` | integer | Blank fields | `3` |
 | `corrections_count` | integer | Corrections submitted at validation; 0 until saved | `14` |
-| `outcome` | string | `pending` after upload, `saved` after validation | `saved` |
+| `outcome` | string | `pending` after upload, `saved` after validation, `record deleted` once its record was deleted (the scan and file are kept) | `saved` |
+| `record_deleted_by`, `record_deleted_at` | string, datetime | Who deleted the record and when; only when `outcome` is `record deleted` | |
 | `record_id` | string or null | The record made from this scan | `REC-2026-7C1E4A90` |
 | `created_at` | datetime | When the scan was uploaded | |
 
@@ -144,7 +146,7 @@ One document per successful OCR run. Created by `POST /api/ocr/upload/`.
 
 ### `audit_log`
 
-One document per logged action. Never updated or deleted by the application.
+One document per logged action. Never updated or deleted by the application. Each entry is also appended, as one JSON line, to `backend/logs/audit.jsonl` (`AUDIT_LOG_FILE`) **before** it is stored here, so the trail survives if the database is wiped, replaced or unreachable. Keep that file on storage that a deploy does not wipe, and include it in backups.
 
 | Field | Type | Description |
 |---|---|---|
@@ -155,15 +157,19 @@ One document per logged action. Never updated or deleted by the application.
 
 | Action | Written when | `details` |
 |---|---|---|
-| `LOGIN` | A user logs in | `role` |
+| `LOGIN` | A user logs in | `role`, `ip` |
+| `LOGIN_FAILED` | A wrong username or password. `user` is the name that was typed | `ip` |
+| `LOGIN_LOCKED` | Repeated failures locked that username | `ip`, `minutes` |
+| `LOGOUT` | A user signs out | `all_devices` (only when every device was signed out) |
+| `PASSWORD_RESET_REQUEST` | A user asked for a new password from the login screen | `ip` |
 | `UPLOAD` | A scan is uploaded and read | `scan_id`, `filename`, `confidence`, `pupil` |
-| `VALIDATE` | A record is saved | `scan_id`, `record_id`, `corrections` (count), `pupil`, `grade` |
-| `EDIT` | A record is updated | `record_id`, `fields` (names of the fields changed) |
-| `DELETE` | A record is deleted, with its scan | `record_id`, `pupil` |
+| `VALIDATE` | A record is saved | `scan_id`, `record_id`, `corrections` (count), `corrected` (`[{field, read, new}]`: what the OCR read and what a person entered), `pupil`, `grade` |
+| `EDIT` | A record is updated | `record_id`, `pupil`, `fields`, `changes` (`{field: {old, new}}`), `grade_changes` (`[{subject, period, old, new}]`) |
+| `DELETE` | A record is deleted; its scan is kept | `record_id`, `pupil`, `scan_kept`, `record` (a snapshot: identity fields, average, remarks and every grade) |
 | `DOWNLOAD` | An original scan is downloaded | `scan_id`, `filename`, `pupil` |
 | `CREATE_USER` | A user account is created | `new_user`, `role` |
 | `DELETE_USER` | A user account is deleted | `deleted_user`, `role` |
-| `EDIT_USER` | A user account is changed | `target_user`, `fields` |
+| `EDIT_USER` | A user account is changed | `target_user`, `fields`, `changes` (`{field: {old, new}}`; passwords are never logged) |
 | `RESET_PASSWORD` | The OIC sets a user's password | `target_user` |
 | `CHANGE_PASSWORD` | A user changes their own password | none |
 | `ENCODE` | A record is typed in on the Fill Out Form 137 page | `record_id`, `pupil`, `grade` |
@@ -221,22 +227,52 @@ Model: `OCRISUser`, which extends Django's `AbstractUser`.
 | `employee_id` | varchar(20), unique, nullable | |
 | `assigned_grade` | varchar(20), nullable | Teacher's class, e.g. `Grade 6` |
 | `assigned_section` | varchar(50), nullable | Teacher's class, e.g. `Sampaguita` |
+| `must_change_password` | boolean | `true` while the password is a temporary one set by the OIC |
+| `password_reset_requested_at` | datetime, nullable | When the user asked for a reset from the login screen; cleared when the OIC sets a password |
 
-### `authtoken_token`
+### `ocris_login_sessions`
 
-Provided by Django REST Framework.
+Model: `LoginSession`. One row per sign-in on one device (replaces the old one-token-per-user table `authtoken_token`, which is no longer used).
 
 | Column | Type | Description |
 |---|---|---|
-| `key` | varchar(40), primary key | The token sent in the `Authorization` header |
-| `user_id` | integer, unique | The owner; one token per user |
-| `created` | datetime | |
+| `key` | varchar(64), primary key | Random value kept in the `ocris_session` HttpOnly cookie |
+| `user_id` | integer | The owner; a user can have several rows |
+| `created` | datetime | The session stops working `TOKEN_TTL_HOURS` (12) hours after this |
+| `user_agent` | varchar(200) | The browser that signed in |
 
-A token is created at first login. Each later login reuses it and resets `created` to the current time; the token stops working `TOKEN_TTL_HOURS` (12) hours after that. It is deleted on logout, when the OIC resets the user's password, and when the account is deleted.
+A row is deleted on sign-out (that device only), by "sign out everywhere", when the user changes their password (their other devices), when the OIC sets a new password, when it expires, and when the account is deleted.
+
+### `ocris_auth_attempts`
+
+Model: `AuthAttempt`. Failed sign-ins (`kind = login`) and password-reset requests (`kind = reset`), counted to limit how often they can be made.
+
+| Column | Type | Description |
+|---|---|---|
+| `kind` | varchar(10) | `login` or `reset` |
+| `username` | varchar(150) | Lower-case name that was typed (it need not exist) |
+| `ip` | varchar(45) | Address of the caller |
+| `at` | datetime | |
+
+Failures of a username are deleted by its next successful sign-in; everything older than a day is deleted when a new attempt is recorded.
 
 The remaining SQLite tables (`django_session`, `auth_group`, `auth_permission`, `django_admin_log`, and so on) are standard Django tables and are not used by OCRIS's own features.
 
 ---
+
+## Indexes
+
+Created by the server the first time it connects to a database (`db.ensure_indexes()`), and by `python manage.py create_indexes` or `maintenance`; safe to repeat. An index that cannot be built, for example a unique one over data that already has duplicates, is logged and skipped. The list is `INDEXES` in `backend/api/db.py`.
+
+| Collection | Indexed on |
+|---|---|
+| `records` | `record_id` (unique), `lrn`, `school_year` + `pupil_name`, `grade_level` + `created_at`, `created_at`, `scan_id` |
+| `scans` | `scan_id` (unique), `outcome` + `created_at`, `uploaded_by` + `outcome`, `grade_level` + `created_at`, `created_at` |
+| `audit_log` | `timestamp` |
+| `users` | `username` (unique) |
+| `grade_levels` | `grade_level` (unique), `sections.section_id` |
+
+These serve the lists and their paging, the duplicate check (same school year and name, or same LRN), the LRN lookup, scan history, the cleanup of old pending scans and the Audit Log page. They do **not** speed up the search box: it looks for text anywhere inside names, subjects and scanned text, which no ordinary index can do, and a section is matched ignoring case. At the size of one school (thousands of records) that is fast enough; a much larger archive would need MongoDB text search. The accounts database (SQLite) has its own indexes for the sign-in limit table.
 
 ## Uploaded files
 

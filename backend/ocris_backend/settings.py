@@ -1,7 +1,10 @@
 import os
+import sys
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+from corsheaders.defaults import default_headers
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,7 +37,6 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'rest_framework.authtoken',
     'corsheaders',
     'api',
 ]
@@ -74,26 +76,64 @@ if REQUIRE_HTTPS:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
+# ── Encryption at rest ───────────────────────────────────────────────────────
+# Uploaded scans and backup files are encrypted with this key (several, comma-separated, to rotate:
+# the first encrypts, all decrypt). Generate one with:
+#   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Without a key, files are stored as they are; that is allowed for local development only.
+DATA_ENCRYPTION_KEYS = _env_list('DATA_ENCRYPTION_KEY', '')
+if DATA_ENCRYPTION_KEYS:
+    try:
+        for _key in DATA_ENCRYPTION_KEYS:
+            Fernet(_key)
+    except ValueError:
+        raise ImproperlyConfigured('DATA_ENCRYPTION_KEY is not a valid key. Generate one as described in settings.py.')
+elif not DEBUG:
+    raise ImproperlyConfigured('Set DATA_ENCRYPTION_KEY in backend/.env (or set DEBUG=True for local development).')
+
 # ── Databases ────────────────────────────────────────────────────────────────
 # SQLite holds Django auth (users, tokens); MongoDB holds records, scans and the audit log.
 DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'ocris_bcs')
 
-# ── REST framework & CORS ────────────────────────────────────────────────────
+# ── Sign-in and sessions ─────────────────────────────────────────────────────
+# A sign-in is kept in an HttpOnly cookie, which scripts on the page cannot read. The cookie is
+# sent across sites only when the site and the server are on different domains (SameSite=None
+# needs HTTPS); every request that changes data must also carry the X-OCRIS-Request header,
+# which another website cannot add, so a forged request from elsewhere is refused.
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': [
-        'api.authentication.ExpiringTokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',
-    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['api.authentication.CookieSessionAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
 }
-# Hours a login stays valid; signing in again restarts the clock
+AUTH_COOKIE_NAME = 'ocris_session'
+AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'None' if REQUIRE_HTTPS else 'Lax')
+REQUEST_HEADER = 'X-OCRIS-Request'
+# Hours a login stays valid
 TOKEN_TTL_HOURS = float(os.getenv('TOKEN_TTL_HOURS', '12'))
+# After this many wrong passwords for one username (or LOGIN_MAX_ATTEMPTS_PER_IP from one address)
+# within LOGIN_LOCKOUT_MINUTES, sign-in is refused until the oldest of them ages out
+LOGIN_MAX_ATTEMPTS = int(os.getenv('LOGIN_MAX_ATTEMPTS', '5'))
+LOGIN_MAX_ATTEMPTS_PER_IP = int(os.getenv('LOGIN_MAX_ATTEMPTS_PER_IP', '20'))
+LOGIN_LOCKOUT_MINUTES = int(os.getenv('LOGIN_LOCKOUT_MINUTES', '15'))
+RESET_MAX_REQUESTS = int(os.getenv('RESET_MAX_REQUESTS', '5'))   # password-reset requests per address per window
+# Number of proxies in front of the server (a cloud host's load balancer counts as one)
+TRUSTED_PROXY_COUNT = int(os.getenv('TRUSTED_PROXY_COUNT', '1' if REQUIRE_HTTPS else '0'))
+
+PASSWORD_MIN_LENGTH = 10
+AUTH_PASSWORD_VALIDATORS = [
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator', 'OPTIONS': {'min_length': PASSWORD_MIN_LENGTH}},
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
+    {'NAME': 'api.password_validators.LetterAndDigitValidator'},
+]
+
 CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
 CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOW_HEADERS = [*default_headers, REQUEST_HEADER.lower()]
 CORS_EXPOSE_HEADERS = ['Content-Disposition']  # lets the frontend read download filenames
 
 # ── Files ────────────────────────────────────────────────────────────────────
@@ -101,8 +141,24 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+# Largest scan accepted, in MB. Larger uploads are refused before they are read or stored.
+MAX_UPLOAD_MB = float(os.getenv('MAX_UPLOAD_MB', '20'))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
-FILE_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024   # bigger uploads are streamed to a temporary file
+
+# ── Housekeeping ─────────────────────────────────────────────────────────────
+# Uploads that were read but never saved as a record are deleted, with their file, after this
+# many days (0 keeps them forever). It happens by itself, at most once an hour, when someone uploads;
+# `manage.py cleanup_scans` does it on demand.
+PENDING_SCAN_DAYS = int(os.getenv('PENDING_SCAN_DAYS', '7'))
+# How many backup files `manage.py maintenance` (or `backup --keep`) leaves in the backups folder.
+BACKUP_KEEP = int(os.getenv('BACKUP_KEEP', '14'))
+
+# ── Audit trail ──────────────────────────────────────────────────────────────
+# Every audit entry is also appended to this file (one JSON object per line), so the trail
+# survives if the database is wiped or replaced. Keep it on storage that is not wiped on deploy.
+# (Tests write nowhere.)
+AUDIT_LOG_FILE = Path(os.getenv('AUDIT_LOG_FILE', os.devnull if 'test' in sys.argv else str(BASE_DIR / 'logs' / 'audit.jsonl')))
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
 # A grade read from a scan is auto-approved only above this confidence (%); anything else is
@@ -117,3 +173,16 @@ LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Manila'
 USE_I18N = True
 USE_TZ = True
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+if AUDIT_LOG_FILE != Path(os.devnull):
+    AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'raw': {'format': '%(message)s'}},
+    'handlers': {'audit_file': {
+        'class': 'logging.FileHandler', 'filename': str(AUDIT_LOG_FILE), 'encoding': 'utf-8', 'formatter': 'raw', 'delay': True,
+    }},
+    'loggers': {'ocris.audit': {'handlers': ['audit_file'], 'level': 'INFO', 'propagate': False}},
+}

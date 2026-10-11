@@ -25,6 +25,7 @@ function toRow(u) {
                   : staff ? 'Full system access' : 'No class assigned — sees no records',
     lastLogin:  u.last_login ? formatDate(u.last_login) : 'Never',
     isActive:   u.is_active !== false,
+    resetAsked: u.password_reset_requested_at ? formatDate(u.password_reset_requested_at) : '',
   }
 }
 
@@ -103,7 +104,14 @@ export default function UsersPage() {
                   <td><Badge type={row.roleBadge}>{row.roleLabel}</Badge></td>
                   <td style={{ fontSize: 11 }}>{row.access}</td>
                   <td style={{ fontSize: 11 }}>{row.lastLogin}</td>
-                  <td><Badge type={row.isActive ? 'b-green' : 'b-grey'}>{row.isActive ? 'Active' : 'Inactive'}</Badge></td>
+                  <td>
+                    <Badge type={row.isActive ? 'b-green' : 'b-grey'}>{row.isActive ? 'Active' : 'Inactive'}</Badge>
+                    {row.resetAsked && (
+                      <div style={{ marginTop: 4 }}>
+                        <Badge type="b-amber">Password reset asked {row.resetAsked}</Badge>
+                      </div>
+                    )}
+                  </td>
                   {canManage && (
                     <td>
                       <div className="btn-row">
