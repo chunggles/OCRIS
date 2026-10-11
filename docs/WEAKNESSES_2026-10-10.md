@@ -2,9 +2,9 @@
 
 This is a list of weaknesses and bugs found by comparing the system with the capstone proposal, "OCRIS (Optical Character Recognition Information System) – School Record Management Decision Support System Using OCR for Bayombong Central School". It is based on reading the code and on the OCR tests run between October 5 and 10.
 
-Nothing on this list has been fixed yet. Tick the box when an item is done.
+Tick the box when an item is done. Sections A and B are fixed in code, apart from the deployment items 1 to 4 and the paper correction 12.
 
-**Fix first:** items 1 to 4 and 14. They decide whether the system matches the paper's title (a cloud-based system) and whether the analytics can be trusted.
+**Fix first:** items 1 to 4. They decide whether the system matches the paper's title (a cloud-based system). Item 14, on whether the analytics can be trusted, is fixed.
 
 ---
 
@@ -36,15 +36,26 @@ Nothing on this list has been fixed yet. Tick the box when an item is done.
 
 ## B. Data correctness bugs
 
-- [ ] **14. Scanned SF10 records distort the analytics.** All four year blocks go into one record as "Filipino Grade 1", "Filipino Grade 2" and so on. Subject means split into many names, and the record's general average and pass/fail remark span four school years.
-- [ ] **15. Typed and scanned SF10 forms are stored differently.** A typed form keeps only its last block as the record's grades; a scanned one keeps all blocks.
-- [ ] **16. Duplicate records are allowed.** The same pupil, LRN and school year can be saved any number of times.
-- [ ] **17. The LRN is not validated** for length, digits or uniqueness.
-- [ ] **18. Subject names cannot be corrected.** A row saved as "Unread learning area" or "English I #2" cannot be renamed during validation or afterwards.
-- [ ] **19. Subject names are inconsistent.** A typed form saves "EPP"; a scan saves "EPP / TLE". They are counted as different subjects.
-- [ ] **20. Sections are matched as text.** Renaming or deleting a section on the Sections page silently orphans its records and its teacher.
-- [ ] **21. Staff edits of scanned records accept any text as a grade.** The 0 to 100 check applies to typed-in forms only.
-- [ ] **22. The pupil's name must be retyped at upload** even though the OCR reads it from the form.
+> **Status, 2026-10-10.** Items 14 to 22 are done in code; see the notes below. Records saved before this change are repaired by running `python manage.py tidy_records` (add `--dry-run` to preview); it needs to be run once on the real database.
+>
+> - **14 and 15:** A form that holds several school years (the SF10-ES, or a Form 137-A with year levels I to VI) is saved as **one record for one year**: the block that matches the grade level chosen at upload, or the last block when none matches. The subject names carry no year suffix any more, and the average, remarks and analytics use that year only. The other years are kept under the record's `details.other_years` and shown on Record Detail as "Also on this form". A typed form already worked this way (its record is the last block with grades, the sheet is kept under `details.blocks`), so the two now follow one rule. The school year of an earlier block is not read from the form, so those blocks are labelled by grade ("Grade 5"), not by year.
+> - **16:** A pupil may have one record per school year. Saving or editing a record that has the same LRN, or the same name and grade level (when the LRNs do not differ), in the same school year is refused with `409` and names the existing record. The scan stays unsaved so it can be corrected.
+> - **17:** An LRN must be 12 digits (spaces and dashes are removed). It is optional. An LRN that already belongs to a pupil with another surname is refused. Checked at upload, validation, typed-in forms and edits; an edit that leaves the LRN unchanged is not re-checked, so old records can still be edited.
+> - **18:** The validation step has a "Learning area names" card for rows the OCR could not name ("Unread learning area Grade 2") or read twice ("English #2"), and Record Detail's edit mode lets staff rename any subject.
+> - **19:** Subject names are tidied when saved: "EPP", "TLE" and "EPP / TLE" are one subject, "GMRC (Good Manners ...)" is "GMRC". Two names that become one are merged.
+> - **20:** Renaming or moving a section also changes its records and its teachers. A section that teachers are assigned to cannot be deleted. The Sections page shows how many records and teachers use each section, and the edit and delete windows say what will be affected. Records of a deleted section keep its name as plain text.
+> - **21:** Every edit and every correction made during validation must be a number from 0 to 100, or blank. A grade that was not changed is not re-checked.
+> - **22:** The name boxes on the upload step are optional. When left blank, the name (and LRN) read from the form fill the boxes on the last step, where they can be corrected.
+
+- [x] **14. Scanned SF10 records distort the analytics.** All four year blocks go into one record as "Filipino Grade 1", "Filipino Grade 2" and so on. Subject means split into many names, and the record's general average and pass/fail remark span four school years.
+- [x] **15. Typed and scanned SF10 forms are stored differently.** A typed form keeps only its last block as the record's grades; a scanned one keeps all blocks.
+- [x] **16. Duplicate records are allowed.** The same pupil, LRN and school year can be saved any number of times.
+- [x] **17. The LRN is not validated** for length, digits or uniqueness.
+- [x] **18. Subject names cannot be corrected.** A row saved as "Unread learning area" or "English I #2" cannot be renamed during validation or afterwards.
+- [x] **19. Subject names are inconsistent.** A typed form saves "EPP"; a scan saves "EPP / TLE". They are counted as different subjects.
+- [x] **20. Sections are matched as text.** Renaming or deleting a section on the Sections page silently orphans its records and its teacher.
+- [x] **21. Staff edits of scanned records accept any text as a grade.** The 0 to 100 check applies to typed-in forms only.
+- [x] **22. The pupil's name must be retyped at upload** even though the OCR reads it from the form.
 
 ## C. OCR weaknesses
 

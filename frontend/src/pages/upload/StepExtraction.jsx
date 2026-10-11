@@ -11,7 +11,7 @@ function detailMismatches(form, fields) {
   const read = Object.fromEntries(fields.map(f => [f.field, f.value]))
   const issues = []
   const scannedName = read['Pupil Name']
-  if (!isNA(scannedName) && !roughlyEqual(scannedName, pupilName(form))) {
+  if (pupilName(form) && !isNA(scannedName) && !roughlyEqual(scannedName, pupilName(form))) {
     issues.push(['Name', scannedName, pupilName(form)])
   }
   const years = listOf(read['School Year'])
@@ -70,7 +70,7 @@ export default function StepExtraction({ data, onNext, onBack }) {
         { value: summary.null_count,          label: 'Blank — ' + FOR_VERIFICATION, color: 'grey' },
         { value: `${summary.overall_conf}%`,  label: 'Overall confidence',     color: 'blue' },
       ]}/>
-      <Card title={`Extracted fields — ${pupilName(form)} / ${form.grade} / ${form.school_year}`}>
+      <Card title={`Extracted fields — ${pupilName(form) || 'name from the form'} / ${form.grade} / ${form.school_year}`}>
         <div className="ocr-grid" style={{ marginBottom: 14 }}>
           {fields.map((f, i) => <OcrField key={i} field={f}/>)}
         </div>

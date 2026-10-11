@@ -14,7 +14,7 @@ export default function StepSuccess({ data, result, position = 1, total = 1, rem
           </svg>
         </div>
         <div className="success-title">{total > 1 ? `Record saved — form ${position} of ${total}` : 'Record saved'}</div>
-        <div className="success-sub">{pupilName(form)} — {form.grade} — AY {form.school_year}</div>
+        <div className="success-sub">{result?.pupil_name || pupilName(form)} — {form.grade} — AY {form.school_year}</div>
         <div className="success-details">
           <InfoRow label="Record ID"><span className="mono-sm">{result?.record_id || '—'}</span></InfoRow>
           <InfoRow label="General average"><strong>{result?.general_average || '—'}</strong></InfoRow>

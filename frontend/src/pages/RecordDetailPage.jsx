@@ -16,8 +16,7 @@ const EDITABLE_INFO = [
   ['section', 'Section'], ['school_year', 'School year'],
 ]
 
-// With `onChange`, every grade becomes an input (edit mode)
-function GradesTable({ grades, onChange }) {
+function GradesTable({ grades }) {
   const subjects = Object.keys(grades)
   if (subjects.length === 0) return <EmptyState>No grades stored for this record.</EmptyState>
   return (
@@ -37,23 +36,14 @@ function GradesTable({ grades, onChange }) {
             return (
               <tr key={subject}>
                 <td className="col-name">{subject}</td>
-                {onChange ? GRADE_KEYS.map(key => (
-                  <td key={key} className="center">
-                    <input className="fld" style={{ width: 64, textAlign: 'center' }} value={isNA(g[key]) ? '' : g[key]}
-                      placeholder={NA} onChange={e => onChange(subject, key, e.target.value)}/>
+                {QUARTERS.map(q => (
+                  <td key={q} className="center" style={{ color: isNA(g[q]) ? 'var(--text-3)' : 'var(--text)' }}>
+                    {isNA(g[q]) ? NA : g[q]}
                   </td>
-                )) : (
-                  <>
-                    {QUARTERS.map(q => (
-                      <td key={q} className="center" style={{ color: isNA(g[q]) ? 'var(--text-3)' : 'var(--text)' }}>
-                        {isNA(g[q]) ? NA : g[q]}
-                      </td>
-                    ))}
-                    <td className="center" style={{ fontWeight: 700, color: isNA(g.final) ? 'var(--text-3)' : failing ? 'var(--rose)' : 'var(--text)' }}>
-                      {isNA(g.final) ? NA : g.final}
-                    </td>
-                  </>
-                )}
+                ))}
+                <td className="center" style={{ fontWeight: 700, color: isNA(g.final) ? 'var(--text-3)' : failing ? 'var(--rose)' : 'var(--text)' }}>
+                  {isNA(g.final) ? NA : g.final}
+                </td>
               </tr>
             )
           })}
@@ -61,6 +51,60 @@ function GradesTable({ grades, onChange }) {
       </table>
     </div>
   )
+}
+
+// Edit mode: `rows` are [{ subject, Q1..Q4, final }]; the learning area's name can be changed too
+function EditGradesTable({ rows, onChange }) {
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table>
+        <thead>
+          <tr>
+            <th>Subject</th>
+            {QUARTERS.map(q => <th key={q} className="center">{q}</th>)}
+            <th className="center">Final</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, i) => (
+            <tr key={i}>
+              <td className="col-name">
+                <input className="fld" value={row.subject} onChange={e => onChange(i, 'subject', e.target.value)} aria-label="Learning area"/>
+              </td>
+              {GRADE_KEYS.map(key => (
+                <td key={key} className="center">
+                  <input className="fld" style={{ width: 64, textAlign: 'center' }} value={isNA(row[key]) ? '' : row[key]}
+                    placeholder={NA} onChange={e => onChange(i, key, e.target.value)} aria-label={`${row.subject || 'Learning area'} ${key}`}/>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// Rows back into {subject: grades}; (grades, problem message)
+function gradesOfRows(rows) {
+  const grades = {}
+  for (const { subject, ...values } of rows) {
+    const name = subject.trim()
+    if (!name) return [null, 'Every row needs a learning area name.']
+    if (grades[name]) return [null, `${name} is listed twice. Give each learning area its own name.`]
+    grades[name] = values
+  }
+  return [grades, null]
+}
+
+// Years of a scanned form other than the one the record is filed under
+function OtherYearsCard({ record }) {
+  const years = Array.isArray(record.details?.other_years) ? record.details.other_years : []
+  return years.map(({ label, grades }) => (
+    <Card key={label} title={`Also on this form: ${label}`} meta="not counted in this record's average">
+      <GradesTable grades={grades || {}}/>
+    </Card>
+  ))
 }
 
 function CorrectionsCard({ corrections }) {
@@ -140,8 +184,8 @@ export default function RecordDetailPage() {
   }
 
   const editing = draft !== null
-  const grades = editing ? draft.grades : r.grades || {}
-  const subjectCount = Object.keys(grades).length
+  const grades = r.grades || {}
+  const subjectCount = editing ? draft.rows.length : Object.keys(grades).length
   // a subject with nothing at all filled in was not taken; a subject with some grades but not others has gaps
   const missingCount = Object.values(grades).reduce((count, g) => {
     const blanks = GRADE_KEYS.filter(key => isNA(g?.[key])).length
@@ -152,17 +196,20 @@ export default function RecordDetailPage() {
     setSaveError('')
     setDraft({
       ...Object.fromEntries(EDITABLE_INFO.map(([field]) => [field, r[field] || ''])),
-      grades: JSON.parse(JSON.stringify(r.grades || {})),
+      rows: Object.entries(r.grades || {}).map(([subject, g]) => ({ subject, ...Object.fromEntries(GRADE_KEYS.map(key => [key, g?.[key] ?? ''])) })),
     })
   }
   const setInfo  = (field, value) => setDraft(d => ({ ...d, [field]: value }))
-  const setGrade = (subject, key, value) =>
-    setDraft(d => ({ ...d, grades: { ...d.grades, [subject]: { ...d.grades[subject], [key]: value } } }))
+  const setRowValue = (index, key, value) =>
+    setDraft(d => ({ ...d, rows: d.rows.map((row, i) => (i === index ? { ...row, [key]: value } : row)) }))
 
   const handleSave = async () => {
+    const [newGrades, problem] = gradesOfRows(draft.rows)
+    if (problem) { setSaveError(problem); return }
     setSaving(true); setSaveError('')
     try {
-      await recordsAPI.update(recordId, draft)
+      const { rows, ...info } = draft
+      await recordsAPI.update(recordId, { ...info, grades: newGrades })
       setDraft(null)
       refetch()
     } catch (e) {
@@ -188,7 +235,7 @@ export default function RecordDetailPage() {
       <Notice type="error">{saveError}</Notice>
       {editing && (
         <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
-          Leave a grade empty if it is blank on the form. The general average and remarks are recalculated when you save.
+          Leave a grade empty if it is blank on the form. A learning area's name can be corrected too. Grades must be numbers from 0 to 100. The general average and remarks are recalculated when you save.
         </div>
       )}
 
@@ -228,9 +275,10 @@ export default function RecordDetailPage() {
             Check {missingCount === 1 ? 'it' : 'them'} against the paper form. No value is estimated.
           </Notice>
         )}
-        <GradesTable grades={grades} onChange={editing ? setGrade : undefined}/>
+        {editing ? <EditGradesTable rows={draft.rows} onChange={setRowValue}/> : <GradesTable grades={grades}/>}
       </Card>
 
+      <OtherYearsCard record={r}/>
       <FormDetailsCard record={r}/>
       <CorrectionsCard corrections={r.corrections}/>
     </div>

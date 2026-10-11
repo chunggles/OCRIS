@@ -43,6 +43,12 @@ export default function SectionModal({ section, gradeLevels = GRADE_LEVELS, defa
           </select>
         </FormGroup>
 
+        {editing && (section.records > 0 || section.teachers > 0) && (
+          <div className="hint">
+            Renaming or moving this section also changes the {section.records} {section.records === 1 ? 'record' : 'records'} and {section.teachers} {section.teachers === 1 ? 'teacher' : 'teachers'} filed under it.
+          </div>
+        )}
+
         <div className="btn-row" style={{ marginTop: 16 }}>
           <Btn variant="primary" onClick={handleSave} disabled={loading}>
             {loading ? 'Saving...' : editing ? 'Save changes' : 'Add Section'}

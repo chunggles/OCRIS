@@ -56,7 +56,7 @@ backend/
     authentication.py       token authentication with expiry
     permissions.py          IsOIC, IsOICOrAdmin
     tests.py                automated tests
-    management/commands/    backup, cleanup_scans, recompute_remarks
+    management/commands/    backup, cleanup_scans, recompute_remarks, tidy_records
     serializers.py          login, user, and validation payloads
     urls.py                 all /api/ routes
     constants.py            passing grade, N/A handling, remark names

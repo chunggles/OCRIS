@@ -67,7 +67,7 @@ export default function UploadPage() {
       )}
       {step > 1 && !isSuccess && total > 1 && (
         <div className="batch-progress">
-          <strong>Form {position} of {total}</strong> — {pupilName(data.form)} — {data.file?.name}
+          <strong>Form {position} of {total}</strong> — {pupilName(data.form) || data.file?.name}
         </div>
       )}
       {steps[step]}

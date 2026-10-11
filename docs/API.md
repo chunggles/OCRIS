@@ -294,9 +294,11 @@ Request:
 }
 ```
 
-`scan_id`, `pupil_name`, `grade_level`, `section`, `school_year` and `confirmed` are required. `lrn` and `corrections` are optional.
+`scan_id`, `grade_level`, `section`, `school_year` and `confirmed` are required. `pupil_name` may be blank, and then the name read from the form is used (`400` if none was read). `lrn` (12 digits, optional), `corrections` and `renames` are optional. `renames` maps a subject label as read (`"Unread learning area Grade 2"`) to the name a person gave it.
 
-The server reads the scan's OCR fields, applies the corrections over them, computes the general average and remarks, creates the record, and marks the scan as saved.
+Every correction must be a number from 0 to 100 or `N/A`, otherwise `400`. A record for the same pupil (same LRN, or same name and grade level) and school year already on file gives `409`, and so does an LRN that belongs to another pupil; the scan stays unsaved.
+
+The server reads the scan's OCR fields, applies the corrections over them, computes the general average and remarks, creates the record, and marks the scan as saved. When the form holds several school years (an SF10-ES, or year levels I to VI on a Form 137-A) the record takes the block of its `grade_level`, or the last block when none matches; the other blocks are kept in `details.other_years` as `[{"label": "Grade 5", "grades": {...}}]` and take no part in the average. Subject names are normalised ("EPP", "TLE" and "EPP / TLE" are one subject). The response is `{record_id, pupil_name, general_average, remarks}`.
 
 Response `200`:
 
@@ -440,11 +442,11 @@ Writes a `DELETE_USER` audit entry.
 
 ## Sections
 
-Sections are a tree, managed on the Sections page: each grade level is a parent node and its sections are the child nodes. It is stored in the `grade_levels` collection, one document per grade level with its sections in a `sections` array. Records and teacher accounts store their section as plain text, so editing or deleting a section here does not change them.
+Sections are a tree, managed on the Sections page: each grade level is a parent node and its sections are the child nodes. It is stored in the `grade_levels` collection, one document per grade level with its sections in a `sections` array. Records and teacher accounts store their section as plain text, matched to a section by its name (case ignored). Renaming or moving a section therefore also updates its records and teacher accounts, and a section with teachers assigned cannot be deleted. The records of a deleted section keep its name.
 
 ### GET `/sections/`
 
-Access: any. Returns the whole tree: all six grade levels in order, including those with no sections, each with its sections ordered by name.
+Access: any. Returns the whole tree: all six grade levels in order, including those with no sections, each with its sections ordered by name. Each section also has `records` and `teachers`, how many records and teacher accounts are filed under it.
 
 ```json
 [
@@ -482,11 +484,11 @@ Access: OIC, Admin.
 
 ### PATCH `/sections/<section_id>/`
 
-Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Changing `grade_level` moves the section under that grade level. Returns the updated section object. Writes an `EDIT_SECTION` audit entry.
+Access: OIC, Admin. Changes `name`, `grade_level` or both, with the same rules as adding. Changing `grade_level` moves the section under that grade level. Returns the updated section object, with `records` and `teachers` giving how many were moved with it. Writes an `EDIT_SECTION` audit entry.
 
 ### DELETE `/sections/<section_id>/`
 
-Access: OIC, Admin. Response `204`, or `404` if there is no such section. Writes a `DELETE_SECTION` audit entry.
+Access: OIC, Admin. Response `204`; `404` if there is no such section; `409` if teachers are assigned to it (the message names them). Writes a `DELETE_SECTION` audit entry.
 
 ---
 
