@@ -1,5 +1,25 @@
 # OCRIS v3: Changelog
 
+## 2026-10-11
+
+Fixes from sections B and C of [docs/WEAKNESSES_2026-10-10.md](docs/WEAKNESSES_2026-10-10.md).
+
+### 1. Data correctness fixes (section B of the weaknesses list)
+
+- **One record, one school year.** A scanned form with several year blocks is saved as the year of its grade level; the other years go under `details.other_years`. Fixes the split subject names ("Filipino Grade 1", "Filipino Grade 2"...) and the average that spanned four years. Typed and scanned forms follow the same rule. Run `python manage.py tidy_records` once (`--dry-run` to preview) to repair records saved earlier; it is a new maintenance command beside `backup`, `cleanup_scans` and `recompute_remarks`.
+- **Subject names** are normalised on save ("EPP", "TLE" and "EPP / TLE" are one subject) and can be renamed during validation and in Record Detail.
+- **Duplicates and LRNs.** One record per pupil per school year; the LRN must be 12 digits and belong to one pupil.
+- **Grades are checked on every edit** and on validation corrections, not only on typed-in forms.
+- **Sections** carry their records and teachers when renamed or moved, and cannot be deleted while a teacher is assigned. `GET /sections/` now includes `records` and `teachers` counts.
+- **The pupil's name is optional at upload** and is read from the form.
+- `POST /ocr/validate/` accepts `renames` and returns `pupil_name`; duplicate and LRN problems come back as `409` and `400`.
+
+### 2. OCR weaknesses (section C of the weaknesses list)
+
+- **Several PDF pages.** Up to 4 pages are read; grade tables on later pages are added to the first page's. Pages without a grade table, or repeating learning areas already read, are skipped with a note. `read_scan()` now returns `(fields, page text, notes)`, `parse_grade_table()` returns `(fields, levels, notes)`, `load_page()` also returns the page count, and `POST /ocr/upload/` returns `notes`.
+- **Year-block names.** A misread or missing "Classified as Grade" is corrected from the other blocks when they agree, with a note; otherwise the old fallback to "Block n" applies.
+- **Unread first row.** The row just above a block's first learning area is kept as "Unread learning area" instead of being dropped, unless it looks like the heading.
+
 ## 2026-10-05 to 2026-10-10
 
 Sections, teacher class rules, multi-form and PDF upload, the on-screen SF10-ES, printing, SF10-ES scanning, and the first round of fixes from the comparison with the capstone paper. The open list of weaknesses is now [docs/WEAKNESSES_2026-10-10.md](docs/WEAKNESSES_2026-10-10.md); the "Open items" further down this file predate it.
@@ -55,22 +75,6 @@ Sections, teacher class rules, multi-form and PDF upload, the on-screen SF10-ES,
 | HTTPS | Required whenever `DEBUG` is off (`REQUIRE_HTTPS`). |
 
 Not done: cloud hosting setup, moving accounts and scan files off local disk, and running OCR as a background job. These wait for deployment.
-
-### 7b. Data correctness fixes (section B of the weaknesses list)
-
-- **One record, one school year.** A scanned form with several year blocks is saved as the year of its grade level; the other years go under `details.other_years`. Fixes the split subject names ("Filipino Grade 1", "Filipino Grade 2"...) and the average that spanned four years. Typed and scanned forms follow the same rule. `python manage.py tidy_records` repairs existing records.
-- **Subject names** are normalised on save ("EPP", "TLE" and "EPP / TLE" are one subject) and can be renamed during validation and in Record Detail.
-- **Duplicates and LRNs.** One record per pupil per school year; the LRN must be 12 digits and belong to one pupil.
-- **Grades are checked on every edit** and on validation corrections, not only on typed-in forms.
-- **Sections** carry their records and teachers when renamed or moved, and cannot be deleted while a teacher is assigned. `GET /sections/` now includes `records` and `teachers` counts.
-- **The pupil's name is optional at upload** and is read from the form.
-- `POST /ocr/validate/` accepts `renames` and returns `pupil_name`; duplicate and LRN problems come back as `409` and `400`.
-
-### 7c. OCR weaknesses (section C of the weaknesses list)
-
-- **Several PDF pages.** Up to 4 pages are read; grade tables on later pages are added to the first page's. Pages without a grade table, or repeating learning areas already read, are skipped with a note. `read_scan()` now returns `(fields, page text, notes)`, `parse_grade_table()` returns `(fields, levels, notes)`, `load_page()` also returns the page count, and `POST /ocr/upload/` returns `notes`.
-- **Year-block names.** A misread or missing "Classified as Grade" is corrected from the other blocks when they agree, with a note; otherwise the old fallback to "Block n" applies.
-- **Unread first row.** The row just above a block's first learning area is kept as "Unread learning area" instead of being dropped, unless it looks like the heading.
 
 ### 8. New dependencies and settings
 
