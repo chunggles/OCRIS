@@ -52,7 +52,10 @@ export default function SectionsPage() {
           </EmptyState>
         ) : parent.sections.map(child => ({ ...child, grade_level: parent.grade_level })).map(section => (
           <div key={section.section_id} className="section-item">
-            <div className="section-name">{section.name}</div>
+            <div className="section-name">
+              {section.name}
+              <span className="hint" style={{ marginLeft: 8 }}>{plural(section.records || 0, 'record')} · {plural(section.teachers || 0, 'teacher')}</span>
+            </div>
             <div className="section-actions">
               <IconBtn icon="pencil" label={`Edit ${section.name}`} onClick={() => setModal({ section })}/>
               <IconBtn icon="trash" label={`Delete ${section.name}`} variant="danger" onClick={() => setDeleting(section)}/>

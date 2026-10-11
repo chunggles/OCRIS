@@ -184,6 +184,35 @@ def record_options(filters=None):
     }
 
 
+def find_record_of_year(pupil_name, lrn, grade_level, school_year, exclude_id=None):
+    """The record already filed for this pupil and school year, matched by LRN or by name and grade."""
+    if not school_year:
+        return None
+    by_pupil = []
+    if pupil_name:
+        # Two pupils may share a name; when both have an LRN and the LRNs differ, they are not the same pupil
+        same_name = {'pupil_name': _exact_ignoring_case(pupil_name), 'grade_level': grade_level}
+        if lrn:
+            same_name['lrn'] = {'$in': ['', None, lrn]}
+        by_pupil.append(same_name)
+    if lrn:
+        by_pupil.append({'lrn': lrn})
+    if not by_pupil:
+        return None
+    query = {'school_year': school_year, '$or': by_pupil}
+    if exclude_id:
+        query['record_id'] = {'$ne': exclude_id}
+    return records_col().find_one(query, {'_id': 0, 'record_id': 1, 'pupil_name': 1, 'school_year': 1})
+
+
+def find_record_by_lrn(lrn, exclude_id=None):
+    """Any record that carries this LRN, to see whose it is."""
+    query = {'lrn': lrn}
+    if exclude_id:
+        query['record_id'] = {'$ne': exclude_id}
+    return records_col().find_one(query, {'_id': 0, 'record_id': 1, 'pupil_name': 1})
+
+
 def all_records():
     return list(records_col().find({}, {'_id': 0}))
 
@@ -365,6 +394,29 @@ def update_section(section_id, name, grade_level):
     else:
         _detach_section(section_id)
         _attach_section(grade_level, section)
+
+
+def _section_match(grade_level, name):
+    return {'grade_level': grade_level, 'section': _exact_ignoring_case(name)}
+
+
+def count_records_in_section(grade_level, name):
+    return records_col().count_documents(_section_match(grade_level, name))
+
+
+def section_record_counts():
+    """{(grade level, lower-case section name): number of records filed under it}."""
+    rows = records_col().aggregate([{'$group': {
+        '_id': {'g': '$grade_level', 's': {'$toLower': '$section'}}, 'n': {'$sum': 1}}}])
+    return {(row['_id']['g'], row['_id']['s']): row['n'] for row in rows}
+
+
+def move_records_of_section(old_grade, old_name, new_grade, new_name):
+    """Re-file the records of a renamed or moved section under its new name. Returns how many changed."""
+    result = records_col().update_many(
+        _section_match(old_grade, old_name),
+        {'$set': {'grade_level': new_grade, 'section': new_name, 'updated_at': datetime.utcnow()}})
+    return result.modified_count
 
 
 def delete_section(section_id):

@@ -10,6 +10,31 @@ const flaggedFields = (scanResult) =>
     .map((f, i) => ({ ...f, _k: String(i) }))
     .filter(f => f.flagged || f.status === 'warn')
 
+// Learning areas the OCR could not read ("Unread learning area Grade 2"), or read twice in one
+// block ("English #2"): a person types what is printed on the form
+const nameOf = (field) => field.slice(0, field.lastIndexOf(' '))
+const needsName = (label) => label.startsWith('Unread learning area') || /\s#\d+$/.test(label)
+const subjectsToName = (scanResult) =>
+  [...new Set((scanResult?.fields || []).filter(f => f.field.includes(' ')).map(f => nameOf(f.field)).filter(needsName))]
+
+function LearningAreaNames({ labels, names, onChange }) {
+  if (labels.length === 0) return null
+  return (
+    <Card title="Learning area names" meta={`${labels.length} to check`}>
+      <div className="hint" style={{ marginTop: 0 }}>
+        These rows have no readable learning area, or the same one twice. Type the name printed on the form, or leave it as it is.
+      </div>
+      {labels.map(label => (
+        <div key={label} className="btn-row" style={{ marginBottom: 6 }}>
+          <span style={{ minWidth: 220 }}>{label}</span>
+          <input className="fld" value={names[label] ?? ''} onChange={e => onChange(label, e.target.value)}
+            placeholder="Learning area as printed" aria-label={`Name for ${label}`}/>
+        </div>
+      ))}
+    </Card>
+  )
+}
+
 function FlaggedFieldCard({ field: f, value, confirmed, onChange, onConfirm, onNA }) {
   return (
     <div className={`review-card${confirmed ? ' done' : ''}`}>
@@ -42,6 +67,10 @@ export default function StepValidation({ data, onNext, onBack }) {
   const [values,    setValues]    = useState(() => Object.fromEntries(flagged.map(f => [f._k, ''])))
   const [confirmed, setConfirmed] = useState(() => Object.fromEntries(flagged.map(f => [f._k, false])))
   const [error,     setError]     = useState('')
+  const [labels]                  = useState(() => subjectsToName(data.scanResult))
+  const [names,     setNames]     = useState(data.renames || {})
+  const renames = Object.fromEntries(Object.entries(names).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
+  const renameCard = <LearningAreaNames labels={labels} names={names} onChange={(label, v) => setNames(n => ({ ...n, [label]: v }))}/>
 
   const doneCount = Object.values(confirmed).filter(Boolean).length
   const remaining = flagged.length - doneCount
@@ -75,20 +104,23 @@ export default function StepValidation({ data, onNext, onBack }) {
       return
     }
     const corrections = flagged.map(f => ({ field: f.field, raw: f.raw, corrected_val: values[f._k] || NA }))
-    onNext({ ...data, corrections })
+    onNext({ ...data, corrections, renames })
   }
 
   if (flagged.length === 0) {
     return (
+      <div>
+      {renameCard}
       <Card>
         <div className="empty-state" style={{ color: 'var(--green)' }}>
           <div className="empty-icon">✓</div>
           <strong>No flags — all fields auto-approved.</strong><br/>You can proceed directly to saving.
           <div style={{ marginTop: 16 }}>
-            <Btn variant="primary" onClick={() => onNext({ ...data, corrections: [] })}>Proceed to confirm →</Btn>
+            <Btn variant="primary" onClick={() => onNext({ ...data, corrections: [], renames })}>Proceed to confirm →</Btn>
           </div>
         </div>
       </Card>
+      </div>
     )
   }
 
@@ -103,6 +135,7 @@ export default function StepValidation({ data, onNext, onBack }) {
       </div>
 
       <Notice>{error}</Notice>
+      {renameCard}
 
       <div className="review-layout">
         {/* Left: source document stays in view while scrolling the list */}

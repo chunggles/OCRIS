@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Btn, Notice } from '../../components/ui/index'
 import { sectionsAPI } from '../../utils/api'
+import { plural } from '../../utils/format'
 
 // Asks before deleting `section` (a section with the grade_level it sits under)
 export default function DeleteSectionModal({ section, onClose, onDeleted }) {
@@ -26,6 +27,9 @@ export default function DeleteSectionModal({ section, onClose, onDeleted }) {
 
         <div className="confirm-text">Are you sure you want to delete this section?</div>
         <div className="confirm-target">{section.name} ({section.grade_level})</div>
+        {section.records > 0 && (
+          <div className="hint">{plural(section.records, 'record')} filed under this section will keep its name as text.</div>
+        )}
 
         <div className="btn-row" style={{ marginTop: 18 }}>
           <Btn variant="delete" onClick={handleDelete} disabled={loading}>{loading ? 'Deleting...' : 'Delete'}</Btn>

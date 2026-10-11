@@ -5,6 +5,7 @@ import { useClassPicker, NO_CLASS } from '../../utils/useClassPicker'
 import { isPdf } from '../../components/ui/ScanPreview'
 import { useObjectUrl } from '../../utils/useObjectUrl'
 import { formatMB, plural } from '../../utils/format'
+import { lrnProblem } from './shared'
 
 const DEFAULT_CLASS = { grade: 'Grade 5', section: '', school_year: CURRENT_SCHOOL_YEAR }
 const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
@@ -36,8 +37,11 @@ const fileProblem = (file) => {
 function validate(rows, classProblem) {
   if (classProblem) return classProblem
   if (rows.length === 0) return 'Please choose at least one scanned Form 137 file.'
-  const unnamed = rows.filter(r => !r.last_name.trim() || !r.first_name.trim())
-  if (unnamed.length) return `Please enter the pupil's name for: ${unnamed.map(r => r.file.name).join(', ')}.`
+  // A name left blank is read from the form; it is checked again before saving
+  const halfNamed = rows.filter(r => Boolean(r.last_name.trim()) !== Boolean(r.first_name.trim()))
+  if (halfNamed.length) return `Enter both the last and first name, or leave both blank, for: ${halfNamed.map(r => r.file.name).join(', ')}.`
+  const badLrn = rows.find(r => lrnProblem(r.lrn.trim()))
+  if (badLrn) return `${badLrn.file.name}: ${lrnProblem(badLrn.lrn.trim())}`
   return null
 }
 
@@ -69,9 +73,9 @@ function FormRow({ row, number, onChange, onRemove }) {
           <Btn size="sm" onClick={onRemove}>Remove</Btn>
         </div>
         <div className="form-row-3">
-          <input className="fld" value={row.last_name} onChange={e => onChange('last_name', e.target.value)} placeholder="Last name *" aria-label={`Last name for ${row.file.name}`}/>
-          <input className="fld" value={row.first_name} onChange={e => onChange('first_name', e.target.value)} placeholder="First name *" aria-label={`First name for ${row.file.name}`}/>
-          <input className="fld" value={row.lrn} onChange={e => onChange('lrn', e.target.value)} placeholder="LRN (optional)" aria-label={`LRN for ${row.file.name}`}/>
+          <input className="fld" value={row.last_name} onChange={e => onChange('last_name', e.target.value)} placeholder="Last name" aria-label={`Last name for ${row.file.name}`}/>
+          <input className="fld" value={row.first_name} onChange={e => onChange('first_name', e.target.value)} placeholder="First name" aria-label={`First name for ${row.file.name}`}/>
+          <input className="fld" value={row.lrn} onChange={e => onChange('lrn', e.target.value)} placeholder="LRN, 12 digits (optional)" inputMode="numeric" maxLength={14} aria-label={`LRN for ${row.file.name}`}/>
         </div>
       </div>
     </div>
@@ -121,7 +125,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
       queue: rows.map(r => ({
         file: r.file,
         form: {
-          last_name: r.last_name.trim(), first_name: r.first_name.trim(), lrn: r.lrn.trim(),
+          last_name: r.last_name.trim(), first_name: r.first_name.trim(), lrn: r.lrn.replace(/[\s-]/g, ''),
           grade, section, school_year: cls.school_year,
         },
       })),
@@ -177,6 +181,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
             </Btn>
             {rows.length > 0 && <Btn onClick={() => setRows([])}>Clear all</Btn>}
           </div>
+          {rows.length > 0 && <div className="hint">Leave a name blank to use the name read from the form; you can check and correct it before saving.</div>}
           {rows.length > 1 && <div className="hint">The forms are read and checked one after another, in this order.</div>}
         </Card>
       </div>

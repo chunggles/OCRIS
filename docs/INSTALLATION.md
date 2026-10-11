@@ -133,6 +133,7 @@ python manage.py changepassword <username>
 | `python manage.py test` | `backend/` | Runs the automated tests. Needs MongoDB; uses a temporary database. |
 | `python manage.py backup` | `backend/` | Writes a dated zip of the accounts, MongoDB data and scans into `backend/backups/` |
 | `python manage.py cleanup_scans` | `backend/` | Deletes uploads never saved as a record and older than 7 days (`--days N`, `--dry-run`) |
+| `python manage.py tidy_records` | `backend/` | One-off repair of older records: one spelling per subject, one school year per scanned form (`--dry-run` to preview) |
 | `python manage.py recompute_remarks` | `backend/` | Recalculates every record's average and remarks (`--dry-run` to preview) |
 | `npm run build` | `frontend/` | Builds the production frontend into `frontend/dist/` |
 | `npm run preview` | `frontend/` | Serves the built frontend locally |

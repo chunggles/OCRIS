@@ -55,6 +55,52 @@ class GradingTests(SimpleTestCase):
         self.assertEqual(grading.compute_general_average(_grades(English='90', Math='N/A', Science='80')), '85.0')
 
 
+class YearBlockTests(SimpleTestCase):
+    def field(self, name, value):
+        return {'field': name, 'value': value}
+
+    def sf10_fields(self):
+        return [
+            self.field('Filipino Grade 1 Q1', '80'), self.field('Filipino Grade 1 Final', '81'),
+            self.field('Filipino Grade 2 Q1', '90'), self.field('Filipino Grade 2 Final', '91'),
+            self.field('EPP Grade 2 Final', '85'), self.field('Unread learning area Grade 2 Final', '70'),
+            self.field('Pupil Name', 'SANTOS, MARIA'),
+        ]
+
+    def test_labels_are_split_into_subject_and_year_block(self):
+        self.assertEqual(grading.split_label('Filipino Grade 2'), ('Filipino', 'Grade 2'))
+        self.assertEqual(grading.split_label('English II #2'), ('English #2', 'II'))
+        self.assertEqual(grading.split_label('Araling Panlipunan Block 3'), ('Araling Panlipunan', 'Block 3'))
+        self.assertEqual(grading.split_label('Mathematics'), ('Mathematics', None))
+        self.assertEqual((grading.block_number('Grade 4'), grading.block_number('III'), grading.block_number('Block 1')), (4, 3, None))
+
+    def test_subject_names_have_one_spelling(self):
+        for name in ('EPP', 'TLE', 'EPP / TLE', 'Technology and Livelihood Education'):
+            self.assertEqual(grading.normalize_subject(name), 'EPP / TLE')
+        self.assertEqual(grading.normalize_subject('GMRC (Good Manners and Right Conduct)'), 'GMRC')
+        self.assertEqual(grading.normalize_subject('*Arabic Language'), 'Arabic Language')
+        self.assertEqual(grading.normalize_subject('  Unread   learning area '), 'Unread learning area')
+        merged = grading.clean_subjects({'EPP': {'Q1': '80', 'final': 'N/A'}, 'TLE': {'Q1': '99', 'final': '82'}})
+        self.assertEqual(merged, {'EPP / TLE': {'Q1': '80', 'final': '82'}})
+
+    def test_a_form_with_several_years_is_filed_as_one_year(self):
+        blocks = grading.build_year_blocks(self.sf10_fields(), {'Filipino Grade 1 Final': '83'}, {'Unread learning area Grade 2': 'Science'})
+        self.assertEqual([label for label, _ in blocks], ['Grade 1', 'Grade 2'])
+        grades, others = grading.choose_year_block(blocks, 'Grade 2')
+        self.assertEqual(sorted(grades), ['EPP / TLE', 'Filipino', 'Science'])
+        self.assertEqual(grades['Filipino']['final'], '91')
+        self.assertEqual([o['label'] for o in others], ['Grade 1'])
+        self.assertEqual(others[0]['grades']['Filipino']['final'], '83')   # the correction applied to its own year
+        # a grade level that matches no block takes the last one
+        self.assertEqual(grading.choose_year_block(blocks, 'Grade 6')[0], grades)
+        grades, others = grading.choose_year_block(blocks, 'Grade 1')
+        self.assertEqual((sorted(grades), others[0]['label']), (['Filipino'], 'Grade 2'))
+
+    def test_a_form_with_one_year_has_nothing_left_over(self):
+        blocks = grading.build_year_blocks([self.field('English Final', '88')], {})
+        self.assertEqual(grading.choose_year_block(blocks, 'Grade 3'), ({'English': {'final': '88'}}, []))
+
+
 class PdfScanTests(SimpleTestCase):
     """A PDF is turned into an image of its first page, so the OCR pipeline can read it."""
 
@@ -479,6 +525,102 @@ class RecordTests(ApiTestCase):
         self.assertEqual(self.as_user(self.unassigned).patch(url, body, format='json').status_code, 403)
         self.assertEqual(self.as_user(self.admin).patch(f'/api/records/{other_class}/update/', body, format='json').status_code, 200)
 
+    def sf10_scan(self):
+        names = ['Filipino', 'English']
+        fields = [{'field': f'{n} Grade {g} {col}', 'value': str(80 + g), 'raw': '', 'conf': 95, 'status': 'ok'}
+                  for g in (5, 6) for n in names for col in ('Q1', 'Final')]
+        fields.append({'field': 'Unread learning area Grade 6 Final', 'value': '?', 'raw': '?', 'conf': 0, 'status': 'warn'})
+        return self.make_scan(ocr_fields=fields)
+
+    def test_scanned_form_with_two_years_is_one_record_of_the_pupils_grade(self):
+        client = self.as_user(self.admin)
+        payload = self.validate_payload(
+            self.sf10_scan(), corrections=[{'field': 'Unread learning area Grade 6 Final', 'corrected_val': '79'}],
+            renames={'Unread learning area Grade 6': 'Science'})
+        response = client.post('/api/ocr/validate/', payload, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        record = db.get_record(response.data['record_id'])
+        self.assertEqual(sorted(record['grades']), ['English', 'Filipino', 'Science'])   # Grade 6 only, no year suffix
+        self.assertEqual(record['grades']['English']['final'], '86')
+        self.assertEqual(record['general_average'], '83.7')
+        self.assertEqual(record['details']['other_years'][0]['label'], 'Grade 5')
+        self.assertEqual(record['details']['other_years'][0]['grades']['Filipino']['final'], '85')
+
+    def test_corrections_must_be_grades(self):
+        scan_id = self.make_scan()
+        for bad in ('abc', '101', '-1'):
+            payload = self.validate_payload(scan_id, corrections=[{'field': 'Mathematics Final', 'corrected_val': bad}])
+            self.assertEqual(self.as_user(self.oic).post('/api/ocr/validate/', payload, format='json').status_code, 400, bad)
+        self.assertEqual(db.records_col().count_documents({}), 0)
+        payload = self.validate_payload(scan_id, corrections=[{'field': 'Mathematics Final', 'corrected_val': 'N/A'}])
+        self.assertEqual(self.as_user(self.oic).post('/api/ocr/validate/', payload, format='json').status_code, 200)
+
+    def test_name_is_read_from_the_form_when_left_blank(self):
+        fields = [{'field': 'Pupil Name', 'value': 'SANTOS, MARIA', 'raw': '', 'conf': 90, 'status': 'ok'},
+                  {'field': 'English Final', 'value': '88', 'raw': '88', 'conf': 95, 'status': 'ok'}]
+        client = self.as_user(self.oic)
+        payload = {**self.validate_payload(self.make_scan(ocr_fields=fields), corrections=[]), 'pupil_name': ''}
+        response = client.post('/api/ocr/validate/', payload, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(db.get_record(response.data['record_id'])['pupil_name'], 'SANTOS, MARIA')
+        # nothing typed and nothing read: it can't be saved
+        response = client.post('/api/ocr/validate/', {**self.validate_payload(self.make_scan()), 'pupil_name': ''}, format='json')
+        self.assertEqual(response.status_code, 400)
+
+    def test_lrn_must_be_12_digits_and_belong_to_one_pupil(self):
+        client = self.as_user(self.oic)
+        for bad in ('12345', '12345678901x', '1234567890123'):
+            payload = self.validate_payload(self.make_scan(), lrn=bad)
+            self.assertEqual(client.post('/api/ocr/validate/', payload, format='json').status_code, 400, bad)
+            self.assertEqual(client.post('/api/records/create/', self.filled_form(lrn=bad), format='json').status_code, 400, bad)
+        spaced = client.post('/api/ocr/validate/', self.validate_payload(self.make_scan(), lrn='1234 5678-9012'), format='json')
+        self.assertEqual(db.get_record(spaced.data['record_id'])['lrn'], '123456789012')
+        # the same LRN under another surname is refused; under the same pupil's name, in another year, it is fine
+        other = self.filled_form(pupil_name='Reyes, Ana', school_year='2023-2024')
+        self.assertEqual(client.post('/api/records/create/', other, format='json').status_code, 409)
+        again = self.filled_form(school_year='2023-2024')
+        self.assertEqual(client.post('/api/records/create/', again, format='json').status_code, 201)
+
+    def test_a_pupil_has_one_record_per_school_year(self):
+        client = self.as_user(self.oic)
+        self.assertEqual(client.post('/api/records/create/', self.filled_form(), format='json').status_code, 201)
+        for body in (self.filled_form(pupil_name='Santos, M.'),      # same LRN
+                     self.filled_form(pupil_name='SANTOS, MARIA', lrn='')):   # same name and grade, no LRN
+            response = client.post('/api/records/create/', body, format='json')
+            self.assertEqual(response.status_code, 409, body)
+            self.assertIn('already has record', response.data['detail'])
+        scan_id = self.make_scan()
+        self.assertEqual(client.post('/api/ocr/validate/', self.validate_payload(scan_id, lrn='123456789012'), format='json').status_code, 409)
+        self.assertEqual(db.get_scan(scan_id).get('outcome'), 'pending')   # the scan stays open to be fixed
+        # another school year, or another pupil with a different LRN, is fine
+        self.assertEqual(client.post('/api/records/create/', self.filled_form(school_year='2023-2024'), format='json').status_code, 201)
+        self.assertEqual(client.post('/api/records/create/', self.filled_form(lrn='999999999999'), format='json').status_code, 201)
+        self.assertEqual(db.records_col().count_documents({}), 3)
+
+    def test_editing_into_a_duplicate_is_refused(self):
+        first = self.make_record(name='Santos, Maria')
+        second = self.make_record(name='Reyes, Ana')
+        client = self.as_user(self.admin)
+        response = client.patch(f'/api/records/{second}/update/', {'pupil_name': 'Santos, Maria'}, format='json')
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(client.patch(f'/api/records/{first}/update/', {'pupil_name': 'Santos, Maria'}, format='json').status_code, 200)
+        self.assertEqual(client.patch(f'/api/records/{first}/update/', {'lrn': '12'}, format='json').status_code, 400)
+
+    def test_scanned_records_accept_only_grades_and_subjects_can_be_renamed(self):
+        grades = {'Unread learning area Grade 6': {'final': '80'}, **_grades(English='88')}
+        record_id = self.make_record(scan_id='SCAN-X', grades=grades)
+        client = self.as_user(self.admin)
+        url = f'/api/records/{record_id}/update/'
+        self.assertEqual(client.patch(url, {'grades': {'English': {'final': 'abc'}}}, format='json').status_code, 400)
+        self.assertEqual(client.patch(url, {'grades': {'English': {'final': '101'}}}, format='json').status_code, 400)
+        renamed = client.patch(url, {'grades': {'Science': {'final': '80'}, 'EPP': {'final': '90'}}}, format='json')
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(sorted(renamed.data['grades']), ['EPP / TLE', 'Science'])   # names are tidied as they are saved
+        # a value saved earlier that is not a grade does not stop other edits
+        db.update_record(record_id, {'grades': {'English': {'Q1': '?', 'final': '88'}}})
+        ok = client.patch(url, {'grades': {'English': {'Q1': '?', 'final': '90'}}}, format='json')
+        self.assertEqual(ok.status_code, 200)
+
     def test_edit_recalculates_average_and_remarks(self):
         record_id = self.make_record(scan_id='SCAN-X')
         body = {'pupil_name': 'Santos, Maria Joy', 'grades': {'English': {'Q1': '80', 'final': '70'}}}
@@ -620,6 +762,32 @@ class SectionTests(ApiTestCase):
         self.assertEqual(self.tree()['Grade 1'], [])
         self.assertEqual(db.get_record(record_id)['section'], 'Rosal')
 
+    def test_renaming_a_section_moves_its_records_and_teachers(self):
+        section_id = self.add('Sampaguita', 'Grade 6').data['section_id']
+        record_id = self.make_record(grade='Grade 6', section='sampaguita')   # case differs, still the same section
+        other = self.make_record(grade='Grade 5', section='Sampaguita', name='Reyes, Ana')   # another grade's section of that name
+        nodes = self.as_user(self.oic).get('/api/sections/').data
+        counts = {(n['grade_level'], s['name']): (s['records'], s['teachers']) for n in nodes for s in n['sections']}
+        self.assertEqual(counts[('Grade 6', 'Sampaguita')], (1, 1))
+
+        response = self.as_user(self.oic).patch(f'/api/sections/{section_id}/', {'name': 'Dahlia'}, format='json')
+        self.assertEqual((response.data['records'], response.data['teachers']), (1, 1))
+        self.assertEqual(db.get_record(record_id)['section'], 'Dahlia')
+        self.assertEqual(db.get_record(other)['section'], 'Sampaguita')
+        self.teacher.refresh_from_db()
+        self.assertEqual(self.teacher.assigned_section, 'Dahlia')
+        self.assertEqual(self.as_user(self.teacher).get('/api/records/').data['total'], 1)   # still sees the class
+
+    def test_a_section_with_teachers_cannot_be_deleted(self):
+        section_id = self.add('Sampaguita', 'Grade 6').data['section_id']
+        response = self.as_user(self.oic).delete(f'/api/sections/{section_id}/')
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('Assign them', response.data['detail'])
+        self.assertEqual(self.tree()['Grade 6'], ['Sampaguita'])
+        self.teacher.assigned_section = 'Orchid'
+        self.teacher.save()
+        self.assertEqual(self.as_user(self.oic).delete(f'/api/sections/{section_id}/').status_code, 204)
+
 
 class CommandTests(ApiTestCase):
     def test_cleanup_scans_removes_only_old_pending_scans(self):
@@ -638,6 +806,19 @@ class CommandTests(ApiTestCase):
         self.assertFalse(path.exists())
         self.assertIsNotNone(db.get_scan(old_saved))
         self.assertIsNotNone(db.get_scan(recent))
+
+    def test_tidy_records_splits_old_scanned_year_blocks(self):
+        grades = {'Filipino Grade 1': {'final': '80'}, 'Filipino Grade 2': {'final': '90'}, 'EPP Grade 2': {'final': '70'}}
+        record_id = self.make_record(grade='Grade 2', grades=grades, general_average='80.0')
+        clean = self.make_record(name='Reyes, Ana', grades=_grades(English='88'))
+        call_command('tidy_records', '--dry-run', stdout=StringIO())
+        self.assertEqual(len(db.get_record(record_id)['grades']), 3)
+        call_command('tidy_records', stdout=StringIO())
+        record = db.get_record(record_id)
+        self.assertEqual(sorted(record['grades']), ['EPP / TLE', 'Filipino'])
+        self.assertEqual((record['general_average'], record['remarks']), ('80.0', 'Retained'))
+        self.assertEqual(record['details']['other_years'][0]['label'], 'Grade 1')
+        self.assertEqual(db.get_record(clean)['grades'], _grades(English='88'))
 
     def test_recompute_remarks_fixes_old_records(self):
         stale = self.make_record(grades=_grades(English='88', Math='?'), general_average='88.0', remarks='Retained')

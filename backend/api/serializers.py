@@ -60,12 +60,14 @@ class CorrectionSerializer(serializers.Serializer):
 
 class ValidationSubmitSerializer(serializers.Serializer):
     scan_id = serializers.CharField()
-    pupil_name = serializers.CharField()
+    pupil_name = serializers.CharField(allow_blank=True, required=False)  # blank: use the name read from the form
     lrn = serializers.CharField(allow_blank=True, required=False)
     grade_level = serializers.CharField()
     section = serializers.CharField()
     school_year = serializers.CharField()
     corrections = CorrectionSerializer(many=True, required=False)
+    # Names given to learning areas the OCR could not read: {subject as read: new name}
+    renames = serializers.DictField(child=serializers.CharField(allow_blank=True), required=False)
     confirmed = serializers.BooleanField()
 
     def validate_confirmed(self, value):

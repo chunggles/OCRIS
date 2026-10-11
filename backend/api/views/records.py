@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from .. import db
 from ..constants import NA
 from ..permissions import IsOICOrAdmin
-from ..services import grading, storage
+from ..services import grading, identity, storage
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param, query_param
 
 # Fields that may be changed on a saved record. The average and remarks are never set
@@ -15,8 +15,9 @@ OPTIONAL_TEXT_FIELDS = ('lrn', 'class_adviser')
 GRADE_KEYS = ('Q1', 'Q2', 'Q3', 'Q4', 'final')
 
 # Parts of a filled-out SF10-ES stored under the record's "details" (see frontend
-# pages/form137/sheet.jsx). "blocks" holds the four year blocks of the sheet.
-DETAIL_FIELDS = ('name_ext', 'middle_name', 'birthdate', 'sex', 'eligibility', 'blocks')
+# pages/form137/sheet.jsx). "blocks" holds the four year blocks of the sheet; "other_years" holds the
+# school years of a scanned form other than the one the record is filed under.
+DETAIL_FIELDS = ('name_ext', 'middle_name', 'birthdate', 'sex', 'eligibility', 'blocks', 'other_years')
 DETAIL_MAX_LENGTH = 100
 DETAIL_MAX_KEY = 40
 DETAIL_MAX_ITEMS = 40
@@ -85,7 +86,7 @@ def _clean_grades(grades):
         if not str(subject).strip() or not isinstance(values, dict) or set(values) - set(GRADE_KEYS):
             return None
         cleaned[str(subject).strip()] = {key: str(values.get(key) or '').strip() or NA for key in GRADE_KEYS}
-    return cleaned
+    return grading.clean_subjects(cleaned)
 
 
 def _record_updates(data):
@@ -96,7 +97,7 @@ def _record_updates(data):
             value = str(data[field] or '').strip()
             if not value and field in REQUIRED_TEXT_FIELDS:
                 return None, f'{field} cannot be blank.'
-            updates[field] = value
+            updates[field] = identity.clean_lrn(value) if field == 'lrn' else value
     if 'grades' in data:
         grades = _clean_grades(data['grades'])
         if grades is None:
@@ -142,17 +143,17 @@ def _clean_details(details):
     return {key: _bounded(details[key]) for key in DETAIL_FIELDS if key in details}
 
 
-def _bad_grade(grades):
-    """The first typed grade that isn't a number from 0 to 100, as (subject, value), or None."""
+def _bad_grade(grades, saved=None):
+    """
+    The first grade that isn't a number from 0 to 100, as (subject, value), or None. With the
+    `saved` grades, values that haven't changed are passed over, so an old record with an
+    odd value can still be edited elsewhere.
+    """
     for subject, values in grades.items():
-        for value in values.values():
-            if value == NA:
+        for key, value in values.items():
+            if value == ((saved or {}).get(subject) or {}).get(key):
                 continue
-            try:
-                valid = 0 <= float(value) <= 100
-            except ValueError:
-                valid = False
-            if not valid:
+            if not grading.is_valid_grade(value):
                 return subject, value
     return None
 
@@ -176,6 +177,12 @@ def record_create(request):
     refusal = outside_own_class(request.user, record)
     if refusal:
         return refusal
+    problem = identity.lrn_problem(record.get('lrn'))
+    if problem:
+        return detail(problem, 400)
+    problem = identity.identity_problem(record)
+    if problem:
+        return detail(problem, 409)
 
     record_id = db.create_record({
         **record, 'details': _clean_details(data.get('details')), 'uploaded_by': request.user.username,
@@ -184,6 +191,19 @@ def record_create(request):
         'record_id': record_id, 'pupil': record['pupil_name'], 'grade': record['grade_level'],
     })
     return Response(db.get_record(record_id), status=201)
+
+
+def _identity_problem_of_edit(record, updates):
+    """(message, status) if an edit gives the record an LRN or identity that clashes, else None."""
+    if not any(updates.get(f, record.get(f)) != record.get(f) for f in ('pupil_name', 'lrn', 'grade_level', 'school_year')):
+        return None
+    merged = {**record, **updates}
+    if 'lrn' in updates and updates['lrn'] != record.get('lrn'):
+        problem = identity.lrn_problem(merged.get('lrn'))
+        if problem:
+            return problem, 400
+    problem = identity.identity_problem(merged, exclude_id=record['record_id'])
+    return (problem, 409) if problem else None
 
 
 def _is_typed(record):
@@ -212,12 +232,15 @@ def record_update(request, record_id):
     updates, error = _record_updates(request.data)
     if error:
         return detail(error, 400)
-    if 'grades' in updates and _is_typed(record):
-        if not updates['grades']:
+    if 'grades' in updates:
+        if _is_typed(record) and not updates['grades']:
             return detail('Enter at least one subject with its grades.', 400)
-        bad = _bad_grade(updates['grades'])
+        bad = _bad_grade(updates['grades'], record.get('grades'))
         if bad:
             return detail(f'{bad[0]}: "{bad[1]}" is not a grade from 0 to 100.', 400)
+    problem = _identity_problem_of_edit(record, updates)
+    if problem:
+        return detail(*problem)
     if user.is_teacher:
         refusal = outside_own_class(user, {**record, **updates})
         if refusal:

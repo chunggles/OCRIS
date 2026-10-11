@@ -1,6 +1,8 @@
 // Helpers shared by the Upload Form 137 steps
 
-export const pupilName = (form) => `${form.last_name}, ${form.first_name}`
+// "Last, First", or whatever was typed; blank when the name is left to be read from the form
+export const pupilName = (form) => [form.last_name, form.first_name].filter(Boolean).join(', ')
+export const lrnProblem = (lrn) => (lrn && !/^\d{12}$/.test(lrn.replace(/[\s-]/g, '')) ? 'The LRN must be 12 digits.' : '')
 
 // Coloured count tiles used by the Processing and Extraction steps.
 // tiles: [{ value, label, color }] where color is 'green' | 'amber' | 'blue' | 'grey'

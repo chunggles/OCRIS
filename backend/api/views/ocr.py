@@ -4,10 +4,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .. import db
-from ..constants import PUPIL_KEYS
+from ..constants import PUPIL_KEYS, is_na
 from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, read_scan
 from ..serializers import ValidationSubmitSerializer
-from ..services import grading, storage
+from ..services import grading, identity, storage
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param
 
 
@@ -28,9 +28,13 @@ def ocr_upload(request):
     if not file:
         return detail('No file provided.', 400)
     pupil = {key: request.data.get(key, '') for key in PUPIL_KEYS}
+    pupil['lrn'] = identity.clean_lrn(pupil['lrn'])
     refusal = outside_own_class(request.user, pupil)
     if refusal:
         return refusal
+    problem = identity.lrn_problem(pupil['lrn'])
+    if problem:
+        return detail(problem, 400)
 
     stored_name, path = storage.save_upload(file)
     try:
@@ -83,13 +87,30 @@ def ocr_validate(request):
         return detail(f"This scan was already saved as record {scan.get('record_id')}.", 409)
 
     corrections = {c['field']: c['corrected_val'] for c in data.get('corrections', [])}
-    grades = grading.build_grades(scan.get('ocr_fields', []), corrections)
+    bad = next(((f, v) for f, v in corrections.items() if f not in grading.PUPIL_FIELDS and not grading.is_valid_grade(v)), None)
+    if bad:
+        return detail(f'{bad[0]}: "{bad[1]}" is not a grade from 0 to 100.', 400)
+
+    scan_name = next((f.get('value') for f in scan.get('ocr_fields', []) if f.get('field') == 'Pupil Name'), '')
+    pupil_name = (data.get('pupil_name') or '').strip() or ('' if is_na(scan_name) else scan_name)
+    if not pupil_name:
+        return detail("The pupil's name is needed: type it, or check that it can be read from the form.", 400)
+    lrn = identity.clean_lrn(data.get('lrn'))
+    problem = identity.lrn_problem(lrn)
+    if problem:
+        return detail(problem, 400)
+    problem = identity.identity_problem({**data, 'pupil_name': pupil_name, 'lrn': lrn})
+    if problem:
+        return detail(problem, 409)
+
+    blocks = grading.build_year_blocks(scan.get('ocr_fields', []), corrections, data.get('renames'))
+    grades, other_years = grading.choose_year_block(blocks, data['grade_level'])
     general_average = grading.compute_general_average(grades)
     remarks = grading.remarks_for(general_average, grades)
 
     record_id = db.create_record({
-        'pupil_name': data['pupil_name'],
-        'lrn': data.get('lrn', ''),
+        'pupil_name': pupil_name,
+        'lrn': lrn,
         'grade_level': data['grade_level'],
         'section': data['section'],
         'school_year': data['school_year'],
@@ -99,16 +120,17 @@ def ocr_validate(request):
         'uploaded_by': request.user.username,
         'scan_id': scan_id,
         'corrections': corrections,
+        'details': {'other_years': other_years} if other_years else {},
     })
     db.mark_scan_saved(scan_id, record_id, len(corrections))
     db.log_action('VALIDATE', request.user.username, {
         'scan_id': scan_id,
         'record_id': record_id,
         'corrections': len(corrections),
-        'pupil': data['pupil_name'],
+        'pupil': pupil_name,
         'grade': data['grade_level'],
     })
-    return Response({'record_id': record_id, 'general_average': general_average, 'remarks': remarks})
+    return Response({'record_id': record_id, 'pupil_name': pupil_name, 'general_average': general_average, 'remarks': remarks})
 
 
 @api_view(['GET'])

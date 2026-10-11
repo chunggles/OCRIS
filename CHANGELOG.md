@@ -56,6 +56,16 @@ Sections, teacher class rules, multi-form and PDF upload, the on-screen SF10-ES,
 
 Not done: cloud hosting setup, moving accounts and scan files off local disk, and running OCR as a background job. These wait for deployment.
 
+### 7b. Data correctness fixes (section B of the weaknesses list)
+
+- **One record, one school year.** A scanned form with several year blocks is saved as the year of its grade level; the other years go under `details.other_years`. Fixes the split subject names ("Filipino Grade 1", "Filipino Grade 2"...) and the average that spanned four years. Typed and scanned forms follow the same rule. `python manage.py tidy_records` repairs existing records.
+- **Subject names** are normalised on save ("EPP", "TLE" and "EPP / TLE" are one subject) and can be renamed during validation and in Record Detail.
+- **Duplicates and LRNs.** One record per pupil per school year; the LRN must be 12 digits and belong to one pupil.
+- **Grades are checked on every edit** and on validation corrections, not only on typed-in forms.
+- **Sections** carry their records and teachers when renamed or moved, and cannot be deleted while a teacher is assigned. `GET /sections/` now includes `records` and `teachers` counts.
+- **The pupil's name is optional at upload** and is read from the form.
+- `POST /ocr/validate/` accepts `renames` and returns `pupil_name`; duplicate and LRN problems come back as `409` and `400`.
+
 ### 8. New dependencies and settings
 
 - Backend: `pypdfium2` (run `pip install -r requirements.txt`).
