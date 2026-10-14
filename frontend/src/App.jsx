@@ -17,6 +17,7 @@ import SectionsPage     from './pages/SectionsPage'
 import UsersPage        from './pages/UsersPage'
 import AuditPage        from './pages/AuditPage'
 import HistoryPage      from './pages/HistoryPage'
+import ProfilePage      from './pages/ProfilePage'
 
 // Keys are the page names passed to nav() and used in NAV_ITEMS
 const PAGES = {
@@ -31,6 +32,7 @@ const PAGES = {
   users:     UsersPage,
   audit:    AuditPage,
   history:   HistoryPage,
+  profile:   ProfilePage,
 }
 
 function AppShell() {

@@ -73,7 +73,7 @@ function Form137({ record, tree, onNew }) {
         <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
           {saved
             ? `Editing record ${saved.record_id}. Change anything on the form, then click Save changes.`
-            : 'Type on the form as you would write on paper. Leave a box empty if it is blank. The final rating fills itself in from the four quarters unless you type one. Print on long bond paper (8.5 × 13 in).'}
+            : 'Type on the form as you would write on paper. Leave a box empty if it is blank. The final rating fills itself in from the three terms unless you type one. The form has two pages (front and back); print both on long bond paper (8.5 × 13 in).'}
         </div>
       </div>
 

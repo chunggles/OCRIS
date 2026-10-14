@@ -17,8 +17,14 @@ export default function StepSuccess({ data, result, position = 1, total = 1, rem
         <div className="success-sub">{result?.pupil_name || pupilName(form)} — {form.grade} — AY {form.school_year}</div>
         <div className="success-details">
           <InfoRow label="Record ID"><span className="mono-sm">{result?.record_id || '—'}</span></InfoRow>
-          <InfoRow label="General average"><strong>{result?.general_average || '—'}</strong></InfoRow>
-          <InfoRow label="Remarks"><RemarksBadge remarks={result?.remarks}/></InfoRow>
+          {result?.archived
+            ? <InfoRow label="Grades">Not scanned — archived only</InfoRow>
+            : (
+              <>
+                <InfoRow label="General average"><strong>{result?.general_average || '—'}</strong></InfoRow>
+                <InfoRow label="Remarks"><RemarksBadge remarks={result?.remarks}/></InfoRow>
+              </>
+            )}
         </div>
         {remaining > 0 ? (
           <>

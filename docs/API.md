@@ -191,7 +191,7 @@ Saves a record typed into the on-screen SF10-ES. No scan is involved, so the rec
 
 `pupil_name`, `grade_level`, `section`, `school_year` and at least one subject in `grades` are required. Each grade is a number from 0 to 100 or left out. The general average and remarks are calculated by the server. A teacher may only send their assigned class.
 
-The top-level class and `grades` are those of the last year block that has grades on the sheet. `details` is optional and holds the rest of the sheet, including all four year blocks as typed, so the form can be shown again. Only the keys shown are kept; text is cut to 100 characters, lists and objects to 40 entries.
+The top-level class and `grades` are those of the last year block that has grades on the sheet. `details` is optional and holds the rest of the sheet, including all eight year blocks as typed (`blocks`), the three certification boxes (`certifications`) and `total_pages`, so the form can be shown again. A typed form sends its three terms as `Q1` to `Q3`; `Q4` is stored as `N/A`. Only the keys shown are kept; text is cut to 100 characters, lists and objects to 40 entries.
 
 Response `201` with the record, `400` for invalid input, `403` for a teacher filing under another class. Writes an `ENCODE` audit entry.
 
@@ -263,8 +263,15 @@ A teacher may only send their assigned `grade_level` and `section` (section case
 | `section` | No | Stored on the scan |
 | `school_year` | No | Stored on the scan |
 | `lrn` | No | Stored on the scan |
+| `archive_only` | No | `true` or `1`: store the file without running OCR (see below) |
 
-Response `200`:
+**Archive only.** With `archive_only`, no OCR is run. `pupil_name` is then required (`400` if blank). The file is stored, a scan is created, and a record is created straight away with empty `grades`, a `null` `general_average`, empty `remarks` and `details.archive_only` set to `true`. The scan is marked `saved`, so `/ocr/validate/` is not called. The audit log gets an `UPLOAD` entry with `archive_only: true` and the `record_id`. Response `200`:
+
+```json
+{ "archived": true, "scan_id": "SCAN-3F9A1C2B", "record_id": "REC-2026-7C1E4A90", "pupil_name": "Pulonan, Ellen Joy A.", "general_average": null, "remarks": "" }
+```
+
+Without `archive_only`, response `200`:
 
 ```json
 {

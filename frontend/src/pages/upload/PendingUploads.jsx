@@ -15,6 +15,7 @@ const nameParts = (full = '') => {
 export default function PendingUploads({ onResume }) {
   const [scans,   setScans]   = useState([])
   const [opening, setOpening] = useState('')
+  const [cancelling, setCancelling] = useState('')
   const [error,   setError]   = useState('')
 
   useEffect(() => {
@@ -42,6 +43,20 @@ export default function PendingUploads({ onResume }) {
     }
   }
 
+  const cancel = async (scan) => {
+    const label = scan.pupil_name || scan.original_name || scan.scan_id
+    if (!window.confirm(`Cancel the unfinished upload for ${label}?\nThe uploaded form and what was read from it are deleted. This cannot be undone.`)) return
+    setCancelling(scan.scan_id); setError('')
+    try {
+      await ocrAPI.cancel(scan.scan_id)
+      setScans(list => list.filter(s => s.scan_id !== scan.scan_id))
+    } catch (e) {
+      const message = errorMessage(e, 'Could not cancel this upload.')
+      setError(message === 'offline' ? "Can't reach the server. Try again in a moment." : message)
+    }
+    setCancelling('')
+  }
+
   if (scans.length === 0) return null
   return (
     <Card title={`Unfinished uploads (${scans.length})`}>
@@ -57,7 +72,10 @@ export default function PendingUploads({ onResume }) {
               {[scan.pupil_name, scan.grade_level, scan.section, `uploaded ${formatDateTime(scan.created_at)}`].filter(Boolean).join(' — ')}
             </div>
           </div>
-          <Btn size="sm" variant="primary" disabled={Boolean(opening)} onClick={() => open(scan)}>
+          <Btn size="sm" disabled={Boolean(opening || cancelling)} onClick={() => cancel(scan)}>
+            {cancelling === scan.scan_id ? 'Cancelling…' : 'Cancel upload'}
+          </Btn>
+          <Btn size="sm" variant="primary" disabled={Boolean(opening || cancelling)} onClick={() => open(scan)}>
             {opening === scan.scan_id ? 'Opening…' : 'Continue'}
           </Btn>
         </div>

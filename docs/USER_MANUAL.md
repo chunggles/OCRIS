@@ -127,6 +127,8 @@ Each form is one image, up to 20 MB. You can upload up to 30 forms of the same c
 3. For each form in the list, type the pupil's **Last name** and **First name**, and the **LRN** if you have it (optional). Click **Remove** to take a form off the list.
 4. Click **Next**.
 
+**Archive only.** Tick **Archive only** above the upload box to store the forms without scanning them for grades. The last and first name are then required for every form, because nothing is read from the scan. After **Next**, each form shows a preview and an **Archive form** button; the quality check, OCR, extraction and validation steps are skipped. The saved record has the scan attached but no grades, general average or remarks.
+
 Type these details carefully. **The saved record uses what you type here**, not what the system reads from the scan.
 
 **Unfinished uploads.** Below the upload box, a card lists your forms that were read but never saved, for example because the page was refreshed or the browser was closed. Click **Continue** to pick one up at step 4 (Extraction), with the scan and everything it read. The forms are kept for 7 days and then removed. Only the form that was being worked on can be resumed: the others in a batch had not been uploaded yet, so choose them again. While you are between step 2 and the end, the browser also asks you to confirm before it lets you leave or refresh the page.
@@ -224,14 +226,15 @@ The **general average** is the average of all Final grades on the form. Blank (N
 
 ### Typing a form instead of scanning it
 
-Click **Fill Out Form 137** in the menu when there is no paper form to scan. The page shows a blank **SF10-ES** (Learner Permanent Academic Record for Elementary School, formerly Form 137), laid out like the printed front page, and you type on it.
+Click **Fill Out Form 137** in the menu when there is no paper form to scan. The page shows a blank **SF10-ES** (Learner Permanent Academic Record for Elementary School, formerly Form 137), laid out like the printed two-page form, and you type on it. The front page has the learner's details, the eligibility section and four year blocks; the back page ("Page 2 of __") has four more year blocks and three certification boxes.
 
 1. Fill in the **Learner's Personal Information**: last name and first name are required; the rest is optional.
 2. Fill in the **Eligibility for Elementary School Enrollment** section if you have it.
-3. In the **Scholastic Record**, use the block for the school year you are recording. The form has four blocks; the learning areas are already printed in each, and you can change them or add more in the empty rows.
+3. In the **Scholastic Record**, use the block for the school year you are recording. The form has eight blocks, four on each page. No learning areas are printed: type each one in the rows of the block.
 4. For each block you put grades in, choose **Classified as Grade**, **Section** and **School Year**. The sections offered are the ones set up for that grade on the Sections page.
-5. Type the grades for each quarter. Leave a box empty if there is no grade. The **Final Rating** fills itself in as the average of the four quarters, rounded to a whole number; type over it if the form shows a different one. **General Average** and, in the last block, **Remarks** are worked out for you.
-6. Click **Save record**.
+5. Type the grades for each term (Term Rating 1, 2 and 3). Leave a box empty if there is no grade. The **Final Rating** fills itself in as the average of the three terms, rounded to a whole number; type over it if the form shows a different one. **General Average** and **Remarks** (PASSED or FAILED) are worked out for you.
+6. On the back page, fill in a **Certification** box for a transfer out or an elementary school completer, if needed.
+7. Click **Save record**. Print both pages on long bond paper (8.5 × 13 in).
 
 A grade that is not a number from 0 to 100 turns red and must be corrected before saving.
 

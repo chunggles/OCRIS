@@ -15,9 +15,9 @@ OPTIONAL_TEXT_FIELDS = ('lrn', 'class_adviser')
 GRADE_KEYS = ('Q1', 'Q2', 'Q3', 'Q4', 'final')
 
 # Parts of a filled-out SF10-ES stored under the record's "details" (see frontend
-# pages/form137/sheet.jsx). "blocks" holds the four year blocks of the sheet; "other_years" holds the
+# pages/form137/sheet.jsx). "blocks" holds the eight year blocks of the sheet (four a page), "certifications" the boxes on its back; "other_years" holds the
 # school years of a scanned form other than the one the record is filed under.
-DETAIL_FIELDS = ('name_ext', 'middle_name', 'birthdate', 'sex', 'eligibility', 'blocks', 'other_years')
+DETAIL_FIELDS = ('name_ext', 'middle_name', 'birthdate', 'sex', 'eligibility', 'blocks', 'certifications', 'total_pages', 'other_years')
 DETAIL_MAX_LENGTH = 100
 DETAIL_MAX_KEY = 40
 DETAIL_MAX_ITEMS = 40

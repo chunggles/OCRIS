@@ -25,6 +25,8 @@ export const NAV_ITEMS = [
   { key: 'sections',  label: 'Sections',        roles: STAFF },
   { key: 'users',     label: 'User Management', roles: STAFF },
   { key: 'audit',     label: 'Audit Log',       roles: STAFF },
+  { section: 'Account' },
+  { key: 'profile',   label: 'Profile' },
 ]
 
 const allowed = (item, role) => !item.roles || item.roles.includes(role)

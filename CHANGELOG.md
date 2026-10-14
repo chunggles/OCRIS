@@ -1,5 +1,20 @@
 # OCRIS v3: Changelog
 
+## 2026-10-14 (Upload Form 137: archive only)
+
+- **Archive only option.** Step 1 of the upload has an **Archive only** checkbox. Forms uploaded this way are stored without OCR or grade reading. The pupil's last and first name are required (nothing is read from the scan). The quality, OCR, extraction, validation and confirm steps are skipped: a new `StepArchive` shows the preview and an **Archive form** button, and the success screen says "Not scanned — archived only".
+- **Backend.** `POST /ocr/upload/` accepts `archive_only`. It stores the file, creates the scan and a record with empty grades, `general_average` `null`, empty remarks and `details.archive_only`, marks the scan saved, and logs `UPLOAD` with `archive_only`.
+- **Docs updated:** USER_MANUAL.md (Step 1), API.md (`/ocr/upload/`), DATABASE.md (`details`, `UPLOAD` audit entry).
+- **Not tested:** no automated test covers this path and it was not clicked through in a browser. How archived records look on the Records, Record Detail and Analytics pages (empty average and remarks) was not checked.
+
+## 2026-10-14 (Fill Out Form 137: two-page SF10-ES)
+
+- **Front and back.** The on-screen form now follows the two-page SF10-ES: the front (learner details, eligibility, four year blocks) and the back (`Page 2 of __`, four more year blocks, three **Certification** boxes). Each page prints on its own long bond sheet. Records saved earlier open with their four blocks on the front and the back blank.
+- **Terms, not quarters.** Each learning area has **Term Rating** 1, 2 and 3 (saved as `Q1` to `Q3`; `Q4` is stored as `N/A`). The final rating is the mean of the three terms unless typed.
+- **Learning areas typed by hand.** No subject is pre-printed any more, including the Arabic Language and Islamic Values Education rows. The "Under old curriculum" note is gone, so the Remarks column fills in PASSED/FAILED in every block.
+- **Docs updated:** USER_MANUAL.md (Typing a form), DATABASE.md (`details`), API.md (record create). Still open: [docs/TODO_TERMS_VS_QUARTERS.md](docs/TODO_TERMS_VS_QUARTERS.md).
+- Backend: `details` also keeps `certifications` and `total_pages`. `vite build` succeeds and the 96 backend tests pass; **the layout was not checked in a browser or on a printer** (the back page uses tighter rows to fit 13 in). The Record Detail and Analytics pages still show four quarter columns.
+
 ## 2026-10-11 (reliability and maintenance)
 
 Fixes from section E of [docs/WEAKNESSES_2026-10-10.md](docs/WEAKNESSES_2026-10-10.md), items 39 to 43. Item 44 (printing on a real printer) is still open: it needs a printer. 11 new automated tests (96 in all, all passing); `vite build` succeeds. **The new Upload-page card and the background refresh of the user were not clicked through in a browser** (see item 45).
@@ -575,8 +590,6 @@ User accounts can now be permanently deleted from User Management. Each row has 
 
 
 #to be fixed
-upload - more form formats 90's- 2020's
-data analytics - "trends" ni adonis
-form uploads - feed new format
-pdf upload - other pdf fixes
-
+upload - more form formats 90's- 2020's (old for archiving)
+search and records - search filter aand etc.
+filling of form 137 - remove remarks bar, quarter rating (1,2,3,4) change to term (1,2,3), manual subject filling

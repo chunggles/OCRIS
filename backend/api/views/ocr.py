@@ -50,6 +50,8 @@ def ocr_upload(request):
         return detail(problem, 400)
 
     maintenance.cleanup_if_due()
+    if str(request.data.get('archive_only', '')).lower() in ('1', 'true'):
+        return _archive_only(request, file, pupil)
     stored_name, path = storage.save_upload(file)
     try:
         known_sections = [section['name'] for node in db.section_tree() for section in node['sections']]
@@ -84,6 +86,33 @@ def ocr_upload(request):
         'pupil': pupil['pupil_name'],
     })
     return Response({'scan_id': scan_id, 'quality': quality, 'fields': fields, 'summary': summary, 'notes': notes})
+
+
+def _archive_only(request, file, pupil):
+    """Keep the scan and a record for it without reading any grades."""
+    if not pupil['pupil_name'].strip():
+        return detail("The pupil's name is needed to archive a form without reading it.", 400)
+    stored_name, _path = storage.save_upload(file)
+    scan_id = db.create_scan({
+        **pupil,
+        'filename': stored_name,
+        'original_name': file.name,
+        'file_size_bytes': file.size,
+        'uploaded_by': request.user.username,
+    })
+    record_id = db.create_record({
+        **pupil,
+        'uploaded_by': request.user.username,
+        'scan_id': scan_id,
+        'details': {'archive_only': True},
+    })
+    db.mark_scan_saved(scan_id, record_id, 0)
+    db.log_action('UPLOAD', request.user.username, {
+        'scan_id': scan_id, 'record_id': record_id, 'filename': file.name,
+        'archive_only': True, 'pupil': pupil['pupil_name'],
+    })
+    return Response({'archived': True, 'scan_id': scan_id, 'record_id': record_id, 'pupil_name': pupil['pupil_name'],
+                     'general_average': None, 'remarks': ''})
 
 
 @api_view(['POST'])
@@ -203,6 +232,24 @@ def scan_history(request):
 def pending_scans(request):
     """The signed-in user's uploads that were read but not saved yet, so a refresh does not lose them."""
     return Response({'results': db.pending_scans_of(request.user.username)})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def cancel_scan(request, scan_id):
+    """Throw away an upload that was read but never saved: its file and its entry."""
+    scan = db.get_scan(scan_id, fields=['scan_id', 'original_name', 'pupil_name', 'grade_level', 'section', 'outcome', 'uploaded_by', 'filename'])
+    if not scan:
+        return not_found('Scan not found.')
+    if not request.user.can_access(scan) or (request.user.is_teacher and scan.get('uploaded_by') != request.user.username):
+        return detail('You can only cancel your own uploads.', 403)
+    if scan.get('outcome') != 'pending':
+        return detail('This upload was already finished, so it cannot be cancelled.', 409)
+    maintenance.remove_scans([scan])
+    db.log_action('CANCEL_UPLOAD', request.user.username, {
+        'scan_id': scan_id, 'filename': scan.get('original_name', ''), 'pupil': scan.get('pupil_name', ''),
+    })
+    return Response({'cancelled': True, 'scan_id': scan_id})
 
 
 @api_view(['GET'])

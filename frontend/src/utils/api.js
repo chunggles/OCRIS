@@ -87,6 +87,7 @@ export const ocrAPI = {
   // Uploads that were read but not saved, and one of them with what was read, to carry on from step 4
   pending:  ()         => request('/ocr/pending/'),
   scan:     (scanId)   => request(`/ocr/scans/${encodeURIComponent(scanId)}/`),
+  cancel:   (scanId)   => request(`/ocr/scans/${encodeURIComponent(scanId)}/cancel/`, { method: 'DELETE' }),
   validate: (payload)  => request('/ocr/validate/', withBody('POST', payload)),
   history:  (page = 1) => request(`/ocr/history/?${qs({ page })}`),
   // The original uploaded file as a Blob, for showing or printing it in the page

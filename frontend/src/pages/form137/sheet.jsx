@@ -1,6 +1,10 @@
 // The on-screen SF10-ES (Learner Permanent Academic Record for Elementary School, formerly
-// Form 137), laid out like the printed front page. Used to fill out and edit records
-// (FillFormPage) and, read-only, to print a typed-in record (PrintFormBtn).
+// Form 137), laid out like the printed two-page form: the front (learner details, eligibility and
+// four year blocks) and the back (four more year blocks and the certification boxes). Used to fill
+// out and edit records (FillFormPage) and, read-only, to print a typed-in record (PrintFormBtn).
+//
+// Learning areas are not pre-printed; each is typed in by hand. Ratings are given per term (three
+// a year), saved under the keys Q1-Q3 so records and the API keep one shape.
 //
 // The printed sheet is also meant to be scanned back in, so the layout keeps what the OCR
 // relies on (backend/api/ocr/table.py): two ruled grade tables side by side with a clear strip
@@ -11,21 +15,13 @@ import { GRADE_LEVELS, SCHOOL_YEARS } from '../../data/constants'
 import { sectionsOf } from '../../utils/api'
 import { isNA, PASSING_GRADE } from '../../utils/format'
 
-const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
-const GRADE_KEYS = [...QUARTERS, 'final']
-const GMRC = 'GMRC (Good Manners and Right Conduct)'
-// Learning areas pre-printed in each of the four year blocks (top left, top right, bottom left, bottom right)
-const PRINTED_AREAS = [
-  ['Language', 'Reading and Literacy', 'Mathematics', GMRC, 'Makabansa'],
-  ['Filipino', 'English', 'Mathematics', GMRC, 'Makabansa'],
-  ['Filipino', 'English', 'Mathematics', 'Science', GMRC, 'Makabansa'],
-  ['Filipino', 'English', 'Mathematics', 'Science', GMRC, 'Araling Panlipunan', 'EPP', 'MAPEH', 'Music & Arts', 'Physical Education & Health'],
-]
-const LAST_AREAS = ['*Arabic Language', '*Islamic Values Education']
+const TERMS = ['Q1', 'Q2', 'Q3']
+const GRADE_KEYS = [...TERMS, 'final']
+const FRONT_BLOCKS = 4  // year blocks on the front; the back holds as many more
+const BLOCK_COUNT = FRONT_BLOCKS * 2
 const AREA_ROWS = 15  // rows of each grade table above "General Average"
-// Printed down the Remarks column of the first three blocks on this edition of the form
-const OLD_CURRICULUM = [true, true, true, false]
 const REMEDIAL_ROWS = 2
+const CERTIFICATION_COUNT = 3
 const BLOCK_TEXT_FIELDS = ['school', 'school_id', 'district', 'division', 'region', 'grade_level', 'section', 'school_year', 'adviser']
 
 const BLANK_LEARNER = { last_name: '', first_name: '', name_ext: '', middle_name: '', lrn: '', birthdate: '', sex: '' }
@@ -34,14 +30,16 @@ const BLANK_ELIGIBILITY = {
   pept_rating: '', exam_date: '', others: '', testing_center: '', remark: '',
 }
 
-const areaRow = (subject, id) => ({ id, subject, Q1: '', Q2: '', Q3: '', Q4: '', final: '' })
+const BLANK_CERTIFICATION = {
+  learner_name: '', lrn: '', grade: '', school_name: '', school_id: '', division: '', last_school_year: '', date: '', signatory: '',
+}
 
-function blankBlock(index) {
-  const printed = PRINTED_AREAS[index]
-  const areas = [...printed, ...Array(AREA_ROWS - printed.length - LAST_AREAS.length).fill(''), ...LAST_AREAS]
+const areaRow = (subject, id) => ({ id, subject, Q1: '', Q2: '', Q3: '', final: '' })
+
+function blankBlock() {
   return {
     ...Object.fromEntries(BLOCK_TEXT_FIELDS.map(key => [key, ''])),
-    rows: areas.map(areaRow),
+    rows: Array.from({ length: AREA_ROWS }, (_, id) => areaRow('', id)),
     remedial: {
       from: '', to: '',
       rows: Array.from({ length: REMEDIAL_ROWS }, () => ({ area: '', final: '', mark: '', recomputed: '', remarks: '' })),
@@ -52,7 +50,9 @@ function blankBlock(index) {
 export const blankSheet = () => ({
   learner: BLANK_LEARNER,
   eligibility: BLANK_ELIGIBILITY,
-  blocks: PRINTED_AREAS.map((_, i) => blankBlock(i)),
+  blocks: Array.from({ length: BLOCK_COUNT }, blankBlock),
+  certifications: Array.from({ length: CERTIFICATION_COUNT }, () => BLANK_CERTIFICATION),
+  total_pages: '',
 })
 
 // Copy of `object` with the value at `path` (keys and array indexes) replaced
@@ -67,9 +67,9 @@ const getIn = (object, path) => path.reduce((value, key) => value?.[key], object
 const isBlank = (v) => String(v ?? '').trim() === ''
 const isBadGrade = (v) => !isBlank(v) && !(Number(v) >= 0 && Number(v) <= 100)
 
-// The final rating is the rounded mean of the four quarters, unless one is typed in
-const computedFinal = (row) => (QUARTERS.every(q => !isBlank(row[q]) && !isBadGrade(row[q]))
-  ? String(Math.round(QUARTERS.reduce((sum, q) => sum + Number(row[q]), 0) / QUARTERS.length))
+// The final rating is the rounded mean of the three terms, unless one is typed in
+const computedFinal = (row) => (TERMS.every(t => !isBlank(row[t]) && !isBadGrade(row[t]))
+  ? String(Math.round(TERMS.reduce((sum, t) => sum + Number(row[t]), 0) / TERMS.length))
   : '')
 const finalOf = (row) => String(row.final).trim() || computedFinal(row)
 const remarkOf = (row) => {
@@ -98,7 +98,7 @@ function gradesOf(block, blockNo) {
     if (!subject) return [null, `Block ${blockNo}: type the learning area for row ${i + 1}.`]
     if (grades[subject]) return [null, `Block ${blockNo}: ${subject} is listed twice.`]
     if (GRADE_KEYS.some(key => isBadGrade(row[key]))) return [null, `Block ${blockNo}, ${subject}: grades must be numbers from 0 to 100.`]
-    grades[subject] = { ...Object.fromEntries(QUARTERS.map(q => [q, String(row[q]).trim()])), final: finalOf(row) }
+    grades[subject] = { ...Object.fromEntries(TERMS.map(t => [t, String(row[t]).trim()])), final: finalOf(row) }
   }
   return [grades, null]
 }
@@ -135,13 +135,15 @@ export function recordOf(sheet) {
       birthdate: learner.birthdate.trim(), sex: learner.sex.trim(),
       eligibility: sheet.eligibility,
       blocks: sheet.blocks,
+      certifications: sheet.certifications,
+      total_pages: sheet.total_pages.trim(),
     },
   }, null]
 }
 
 // A block as saved, topped up with any field a newer version of the form has added
-function restoredBlock(saved, index) {
-  const blank = blankBlock(index)
+function restoredBlock(saved) {
+  const blank = blankBlock()
   const rows = Array.isArray(saved?.rows) && saved.rows.length ? saved.rows : blank.rows
   return {
     ...blank, ...saved,
@@ -152,10 +154,10 @@ function restoredBlock(saved, index) {
 
 // A record that was not typed on this sheet (or predates it): its grades go in the block for its grade level
 function blocksFromGrades(record) {
-  const gradeNo = Number((record.grade_level || '').replace(/\D/g, '')) || PRINTED_AREAS.length
-  const index = Math.min(Math.max(gradeNo, 1), PRINTED_AREAS.length) - 1
-  return PRINTED_AREAS.map((_, i) => {
-    const block = blankBlock(i)
+  const gradeNo = Number((record.grade_level || '').replace(/\D/g, '')) || 1
+  const index = Math.min(Math.max(gradeNo, 1), BLOCK_COUNT) - 1
+  return Array.from({ length: BLOCK_COUNT }, (_, i) => {
+    const block = blankBlock()
     if (i !== index) return block
     const subjects = Object.entries(record.grades || {}).slice(0, AREA_ROWS)
     const rows = [...subjects, ...Array(AREA_ROWS - subjects.length).fill(['', {}])].map(([subject, g], id) => ({
@@ -181,15 +183,18 @@ export function sheetOf(record) {
       birthdate: details.birthdate || details.birth_date || '', sex: details.sex || '',
     },
     eligibility: { ...BLANK_ELIGIBILITY, ...details.eligibility },
-    blocks: Array.isArray(details.blocks) && details.blocks.length === PRINTED_AREAS.length
-      ? details.blocks.map(restoredBlock)
+    // a record saved before the back page was added has fewer blocks; the rest start blank
+    blocks: Array.isArray(details.blocks) && details.blocks.length
+      ? Array.from({ length: BLOCK_COUNT }, (_, i) => (details.blocks[i] ? restoredBlock(details.blocks[i]) : blankBlock()))
       : blocksFromGrades(record),
+    certifications: Array.from({ length: CERTIFICATION_COUNT }, (_, i) => ({ ...BLANK_CERTIFICATION, ...details.certifications?.[i] })),
+    total_pages: details.total_pages || '',
   }
 }
 
 // ── The sheet ────────────────────────────────────────────────────────────────
 
-const GRADE_COLUMN_WIDTHS = ['48%', '6.3%', '6.3%', '6.3%', '6.3%', '11%', '15.8%']
+const GRADE_COLUMN_WIDTHS = ['46%', '8%', '8%', '8%', '11.5%', '18.5%']
 const REMEDIAL_COLUMN_WIDTHS = ['28.7%', '19.3%', '18.9%', '17.3%', '15.8%']
 const REMEDIAL_COLUMNS = [['area', 'Learning Areas'], ['final', 'Final Rating'], ['mark', 'Remedial Class Mark'], ['recomputed', 'Recomputed Final Grade'], ['remarks', 'Remarks']]
 const gradeNumber = (gradeLevel) => gradeLevel.replace(/\D/g, '')
@@ -261,11 +266,11 @@ export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
           <thead>
             <tr>
               <th rowSpan="2">{i % 2 ? 'Learning Areas' : 'LEARNING AREAS'}</th>
-              <th colSpan="4">Quarterly Rating</th>
+              <th colSpan="3">Term Rating</th>
               <th rowSpan="2">Final Rating</th>
               <th rowSpan="2">Remarks</th>
             </tr>
-            <tr>{QUARTERS.map((q, n) => <th key={q}>{n + 1}</th>)}</tr>
+            <tr>{TERMS.map((t, n) => <th key={t}>{n + 1}</th>)}</tr>
           </thead>
           <tbody>
             {b.rows.map((row, r) => (
@@ -276,24 +281,18 @@ export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
                     {cell([...path, 'rows', r, key], {
                       bad: isBadGrade(row[key]), inputMode: 'decimal', maxLength: 5,
                       placeholder: key === 'final' ? computedFinal(row) : undefined,
-                      'aria-label': `${row.subject || 'Learning area'} ${key === 'final' ? 'final rating' : `quarter ${n + 1}`}`,
+                      'aria-label': `${row.subject || 'Learning area'} ${key === 'final' ? 'final rating' : `term ${n + 1}`}`,
                     })}
                   </td>
                 ))}
-                {OLD_CURRICULUM[i]
-                  ? r === 0 && (
-                    <td rowSpan={AREA_ROWS + 1} className="sf-note">
-                      <div><b>UNDER OLD CURRICULUM</b><br/><i>See attached old School Form 10 with learning areas<br/>based on DepEd Order No. 21, s. 2019</i></div>
-                    </td>
-                  )
-                  : <td className="sf-auto">{remarkOf(row)}</td>}
+                <td className="sf-auto">{remarkOf(row)}</td>
               </tr>
             ))}
             <tr>
               <td className="sf-label">General Average</td>
-              <td/><td/><td/><td/>
+              <td/><td/><td/>
               <td className="sf-auto">{generalAverage(b)}</td>
-              {!OLD_CURRICULUM[i] && <td/>}
+              <td/>
             </tr>
           </tbody>
         </table>
@@ -305,7 +304,7 @@ export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
               <th>Remedial Classes</th>
               <td colSpan="4">
                 <div className="sf-line sf-conducted">
-                  <b>Conducted from:</b> {blank([...path, 'remedial', 'from'], { flex: 1, center: true })}
+                  <b>{i < FRONT_BLOCKS ? 'Conducted from:' : 'Date Conducted:'}</b> {blank([...path, 'remedial', 'from'], { flex: 1, center: true })}
                   <b>to</b> {blank([...path, 'remedial', 'to'], { flex: 1, center: true })}
                 </div>
               </td>
@@ -324,61 +323,104 @@ export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
     )
   }
 
+  const certification = (c, i) => {
+    const path = ['certifications', i]
+    return (
+      <div className="sf-cert" key={i}>
+        <div className="sf-band">CERTIFICATION</div>
+        <div className="sf-box">
+          <div className="sf-line">
+            <b>I CERTIFY</b> that this is a true record of {blank([...path, 'learner_name'], { flex: 4 })}
+            with LRN {blank([...path, 'lrn'], { flex: 2, inputMode: 'numeric', maxLength: 12 })}
+            and that he/she is eligible for admission to Grade {blank([...path, 'grade'], { width: '3em', center: true })}.
+          </div>
+          <div className="sf-line">
+            <b>School Name</b> {blank([...path, 'school_name'], { flex: 4 })}
+            <b>School ID</b> {blank([...path, 'school_id'], { width: '7em' })}
+            <b>Division</b> {blank([...path, 'division'], { flex: 2 })}
+            <b>Last School Year Attended:</b> {blank([...path, 'last_school_year'], { width: '8em', center: true })}
+          </div>
+          <div className="sf-line sf-sign">
+            <div className="sf-sign-col" style={{ flex: 2 }}>{blank([...path, 'date'], { center: true })}<span>Date</span></div>
+            <div className="sf-sign-col" style={{ flex: 4 }}>{blank([...path, 'signatory'], { center: true })}<span>Signature of Principal/School Head over Printed Name</span></div>
+            <i className="sf-seal-note">(Affix School Seal here)</i>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="sf10">
-      <div className="sf-head">
-        <div className="sf-formno">SF10-ES</div>
-        <img src={sealUrl} alt="" className="sf-seal"/>
-        <div className="sf-titles">
-          <div>Republic of the Philippines</div>
-          <div>Department of Education</div>
-          <div className="sf-title">Learner Permanent Academic Record for Elementary School (SF10-ES)</div>
-          <div className="sf-formerly">(Formerly Form 137)</div>
+    <>
+      <div className="sf10">
+        <div className="sf-head">
+          <div className="sf-formno">SF10-ES</div>
+          <img src={sealUrl} alt="" className="sf-seal"/>
+          <div className="sf-titles">
+            <div>Republic of the Philippines</div>
+            <div>Department of Education</div>
+            <div className="sf-title">Learner Permanent Academic Record for Elementary School (SF10-ES)</div>
+            <div className="sf-formerly">(Formerly Form 137)</div>
+          </div>
+          <img src={logoUrl} alt="" className="sf-logo"/>
         </div>
-        <img src={logoUrl} alt="" className="sf-logo"/>
-      </div>
 
-      <div className="sf-band">LEARNER'S PERSONAL INFORMATION</div>
-      <div className="sf-line">
-        LAST NAME: {blank(['learner', 'last_name'], { flex: 4, 'aria-label': 'Last name' })}
-        FIRST NAME: {blank(['learner', 'first_name'], { flex: 4, 'aria-label': 'First name' })}
-        NAME EXTN. (Jr,I,II) {blank(['learner', 'name_ext'], { width: '4.5em', 'aria-label': 'Name extension' })}
-        MIDDLE NAME: {blank(['learner', 'middle_name'], { flex: 3, 'aria-label': 'Middle name' })}
-      </div>
-      <div className="sf-line">
-        Learner Reference Number (LRN): {blank(['learner', 'lrn'], { flex: 3, inputMode: 'numeric', maxLength: 12, 'aria-label': 'LRN' })}
-        Birthdate (mm/dd/yyyy): {blank(['learner', 'birthdate'], { flex: 4, placeholder: readOnly ? undefined : 'mm/dd/yyyy', 'aria-label': 'Birthdate' })}
-        Sex: {blank(['learner', 'sex'], { width: '9em', 'aria-label': 'Sex' })}
-      </div>
-
-      <div className="sf-band sf-band-lg">ELIGIBILITY FOR ELEMENTARY SCHOOL ENROLLMENT</div>
-      <div className="sf-box">
+        <div className="sf-band">LEARNER'S PERSONAL INFORMATION</div>
         <div className="sf-line">
-          <i>Credential Presented for Grade 1:</i>
-          <span style={{ flex: 1 }}/>{tick('kinder_progress_report', 'Kinder Progress Report')}
-          <span style={{ flex: 1 }}/>{tick('eccd_checklist', 'ECCD Checklist')}<span style={{ flex: 3 }}/>
+          LAST NAME: {blank(['learner', 'last_name'], { flex: 4, 'aria-label': 'Last name' })}
+          FIRST NAME: {blank(['learner', 'first_name'], { flex: 4, 'aria-label': 'First name' })}
+          NAME EXTN. (Jr,I,II) {blank(['learner', 'name_ext'], { width: '4.5em', 'aria-label': 'Name extension' })}
+          MIDDLE NAME: {blank(['learner', 'middle_name'], { flex: 3, 'aria-label': 'Middle name' })}
         </div>
         <div className="sf-line">
-          Name of School: {blank(['eligibility', 'school_name'], { flex: 4 })}
-          School ID: {blank(['eligibility', 'school_id'], { width: '7em' })}
-          Address of School: {blank(['eligibility', 'school_address'], { flex: 5 })}
+          Learner Reference Number (LRN): {blank(['learner', 'lrn'], { flex: 3, inputMode: 'numeric', maxLength: 12, 'aria-label': 'LRN' })}
+          Birthdate (mm/dd/yyyy): {blank(['learner', 'birthdate'], { flex: 4, placeholder: readOnly ? undefined : 'mm/dd/yyyy', 'aria-label': 'Birthdate' })}
+          Sex: {blank(['learner', 'sex'], { width: '9em', 'aria-label': 'Sex' })}
         </div>
-      </div>
-      <div className="sf-line">Other Credential Presented</div>
-      <div className="sf-line sf-indent">
-        PEPT Passer &nbsp;Rating: {blank(['eligibility', 'pept_rating'], { width: '5em' })}
-        <span style={{ flex: 1 }}/>Date of Examination/Assessment (mm/dd/yyyy): {blank(['eligibility', 'exam_date'], { width: '10em' })}
-        <span style={{ flex: 1 }}/>Others (Pls. Specify): {blank(['eligibility', 'others'], { width: '14em' })}
-      </div>
-      <div className="sf-line sf-indent">
-        Name and Address of Testing Center: {blank(['eligibility', 'testing_center'], { flex: 4 })}
-        Remark: {blank(['eligibility', 'remark'], { flex: 3 })}
+
+        <div className="sf-band sf-band-lg">ELIGIBILITY FOR ELEMENTARY SCHOOL ENROLLMENT</div>
+        <div className="sf-box">
+          <div className="sf-line">
+            <i>Credential Presented for Grade 1:</i>
+            <span style={{ flex: 1 }}/>{tick('kinder_progress_report', 'Kinder Progress Report')}
+            <span style={{ flex: 1 }}/>{tick('eccd_checklist', 'ECCD Checklist')}<span style={{ flex: 3 }}/>
+          </div>
+          <div className="sf-line">
+            Name of School: {blank(['eligibility', 'school_name'], { flex: 4 })}
+            School ID: {blank(['eligibility', 'school_id'], { width: '7em' })}
+            Address of School: {blank(['eligibility', 'school_address'], { flex: 5 })}
+          </div>
+        </div>
+        <div className="sf-line">Other Credential Presented</div>
+        <div className="sf-line sf-indent">
+          PEPT Passer &nbsp;Rating: {blank(['eligibility', 'pept_rating'], { width: '5em' })}
+          <span style={{ flex: 1 }}/>Date of Examination/Assessment (mm/dd/yyyy): {blank(['eligibility', 'exam_date'], { width: '10em' })}
+          <span style={{ flex: 1 }}/>Others (Pls. Specify): {blank(['eligibility', 'others'], { width: '14em' })}
+        </div>
+        <div className="sf-line sf-indent">
+          Name and Address of Testing Center: {blank(['eligibility', 'testing_center'], { flex: 4 })}
+          Remark: {blank(['eligibility', 'remark'], { flex: 3 })}
+        </div>
+
+        <div className="sf-band">SCHOLASTIC RECORD</div>
+        <div className="sf-pair">{sheet.blocks.slice(0, 2).map((b, i) => block(b, i))}</div>
+        <div className="sf-pair">{sheet.blocks.slice(2, FRONT_BLOCKS).map((b, i) => block(b, i + 2))}</div>
+        <div className="sf-revised">Revised 2025 based on DepEd Order No. 10, s. 2024</div>
       </div>
 
-      <div className="sf-band">SCHOLASTIC RECORD</div>
-      <div className="sf-pair">{sheet.blocks.slice(0, 2).map((b, i) => block(b, i))}</div>
-      <div className="sf-pair">{sheet.blocks.slice(2, 4).map((b, i) => block(b, i + 2))}</div>
-      <div className="sf-revised">Revised 2025 based on DepEd Order No. 10, s. 2024</div>
-    </div>
+      <div className="sf10 sf-back">
+        <div className="sf-pagehead">
+          <b>SF10-ES</b>
+          <span>Page 2 of {blank(['total_pages'], { width: '3em', center: true, maxLength: 3, 'aria-label': 'Total pages' })}</span>
+        </div>
+        <div className="sf-band">SCHOLASTIC RECORD</div>
+        <div className="sf-pair">{sheet.blocks.slice(FRONT_BLOCKS, FRONT_BLOCKS + 2).map((b, i) => block(b, i + FRONT_BLOCKS))}</div>
+        <div className="sf-pair">{sheet.blocks.slice(FRONT_BLOCKS + 2).map((b, i) => block(b, i + FRONT_BLOCKS + 2))}</div>
+
+        <div className="sf-foronly"><b>For Transfer Out /Elementary School Completer Only</b></div>
+        {sheet.certifications.map(certification)}
+        <div className="sf-revised sf-back-foot"><span>May add Certification Box if needed</span>Revised 2025 based on DepEd Order No. 10, s. 2024</div>
+      </div>
+    </>
   )
 }

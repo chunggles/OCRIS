@@ -80,7 +80,7 @@ One document per validated Form 137. Created by `POST /api/ocr/validate/`.
 | `uploaded_by` | string | Username of the person who saved the record | `g.ramos` |
 | `scan_id` | string | The scan this record was made from; empty for a record typed in on the Fill Out Form 137 page | `SCAN-3F9A1C2B` |
 | `corrections` | object | Values entered by hand during validation, keyed by field name | `{"English I Q2": "88"}` |
-| `details` | object | The rest of a typed-in SF10-ES sheet, see below; empty for scanned records | |
+| `details` | object | The rest of a typed-in SF10-ES sheet, see below; empty for scanned records. An archive-only record (uploaded without scanning) has `{"archive_only": true}`, empty `grades`, and a `null` `general_average` | |
 | `created_at` | datetime | When the record was saved | |
 | `updated_at` | datetime | Last change | |
 
@@ -101,7 +101,11 @@ On a multi-year Form 137-A the subject key includes the year level (`English I`,
 |---|---|---|
 | `name_ext`, `middle_name`, `birthdate`, `sex` | string | The learner's other personal information |
 | `eligibility` | object | The eligibility section: `kinder_progress_report`, `eccd_checklist` (true or false), `school_name`, `school_id`, `school_address`, `pept_rating`, `exam_date`, `others`, `testing_center`, `remark` |
-| `blocks` | array of 4 | Each scholastic-record block as typed: `school`, `school_id`, `district`, `division`, `region`, `grade_level`, `section`, `school_year`, `adviser`, `rows` (learning area with `Q1` to `Q4` and `final`), and `remedial` (`from`, `to`, `rows`) |
+| `blocks` | array of 8 | Each scholastic-record block as typed, four on the front and four on the back: `school`, `school_id`, `district`, `division`, `region`, `grade_level`, `section`, `school_year`, `adviser`, `rows` (learning area `subject` with the three term ratings `Q1` to `Q3` and `final`), and `remedial` (`from`, `to`, `rows`). A record saved before the back page was added has 4 blocks. Rows saved then may also hold a `Q4`. |
+| `certifications` | array of 3 | The certification boxes on the back: `learner_name`, `lrn`, `grade`, `school_name`, `school_id`, `division`, `last_school_year`, `date`, `signatory` |
+| `total_pages` | string | The "of ___" in "Page 2 of ___" |
+
+The three term ratings of a typed form are stored as `Q1` to `Q3`; `Q4` is saved as `N/A`.
 
 The record's own `grade_level`, `section`, `school_year` and `grades` are those of the last block that has grades.
 
@@ -162,11 +166,12 @@ One document per logged action. Never updated or deleted by the application. Eac
 | `LOGIN_LOCKED` | Repeated failures locked that username | `ip`, `minutes` |
 | `LOGOUT` | A user signs out | `all_devices` (only when every device was signed out) |
 | `PASSWORD_RESET_REQUEST` | A user asked for a new password from the login screen | `ip` |
-| `UPLOAD` | A scan is uploaded and read | `scan_id`, `filename`, `confidence`, `pupil` |
+| `UPLOAD` | A scan is uploaded and read, or archived without reading | `scan_id`, `filename`, `confidence`, `pupil`; for an archive-only upload `record_id` and `archive_only` instead of `confidence` |
 | `VALIDATE` | A record is saved | `scan_id`, `record_id`, `corrections` (count), `corrected` (`[{field, read, new}]`: what the OCR read and what a person entered), `pupil`, `grade` |
 | `EDIT` | A record is updated | `record_id`, `pupil`, `fields`, `changes` (`{field: {old, new}}`), `grade_changes` (`[{subject, period, old, new}]`) |
 | `DELETE` | A record is deleted; its scan is kept | `record_id`, `pupil`, `scan_kept`, `record` (a snapshot: identity fields, average, remarks and every grade) |
 | `DOWNLOAD` | An original scan is downloaded | `scan_id`, `filename`, `pupil` |
+| `CANCEL_UPLOAD` | An unfinished upload is cancelled and its file deleted | `scan_id`, `filename`, `pupil` |
 | `CREATE_USER` | A user account is created | `new_user`, `role` |
 | `DELETE_USER` | A user account is deleted | `deleted_user`, `role` |
 | `EDIT_USER` | A user account is changed | `target_user`, `fields`, `changes` (`{field: {old, new}}`; passwords are never logged) |

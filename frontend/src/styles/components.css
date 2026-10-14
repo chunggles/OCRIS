@@ -283,12 +283,20 @@ select.sf-in{appearance:none;-webkit-appearance:none;cursor:pointer;padding:0}
 .sf-in::placeholder{color:#B8C0CE}
 .sf-table td.sf-auto{color:#1B3A8C;font-size:.85em}
 .sf-table td.sf-label{text-align:left;padding-left:.35em;font-weight:700}
-.sf-table td.sf-note{font-size:1em;padding:0}
-.sf-note div{writing-mode:vertical-rl;transform:rotate(180deg);margin:0 auto;line-height:1.25;font-size:1.05em;white-space:nowrap}
-.sf-note b{font-size:1.15em}
 .sf-remedial{margin-top:.35em}
 .sf-conducted{margin:0;padding:0 .4em;align-items:center;font-size:.95em}
 .sf-revised{text-align:right;font-style:italic;font-size:.75em;margin-top:.4em}
+/* The back page: tighter rows so four year blocks and three certification boxes fit one long bond sheet */
+.sf-back .sf-table th,.sf-back .sf-table td{height:1.45em}
+.sf-back .sf-cell{height:1.4em}
+.sf-pagehead{display:flex;justify-content:space-between;align-items:center;font-size:.85em}
+.sf-foronly{font-size:.85em;margin-top:.8em}
+.sf-cert{margin-top:.5em}
+.sf-cert .sf-band{margin-top:0}
+.sf-sign{margin-top:1.2em}
+.sf-sign-col{display:flex;flex-direction:column;align-items:stretch;text-align:center;font-size:.85em;gap:.15em}
+.sf-seal-note{flex:1.5;text-align:right;font-size:.8em}
+.sf-back-foot{display:flex;justify-content:space-between}
 /* Printing. The browser prints its own header and footer (date, page title, address, page number)
    in the page margin. A page with no margin leaves it no room, so they are dropped; the white
    border around what is printed comes from padding instead.
@@ -307,8 +315,9 @@ select.sf-in{appearance:none;-webkit-appearance:none;cursor:pointer;padding:0}
   /* An uploaded scan fills one page without being cropped or stretched */
   .print-scan{display:block;margin:0 auto;padding:12mm;box-sizing:border-box;max-width:100%;max-height:100vh;object-fit:contain}
   /* 84em of sheet plus 2 x 2.6em of padding across the 8.5in page */
-  .sf10{page:sf10;font-size:calc(8.5in / 89.2);margin:0;border:none;box-shadow:none}
-  /* A final rating worked out from the quarters is shown as a placeholder; on paper it is a grade like any other */
+  .sf10{page:sf10;font-size:calc(8.5in / 89.2);margin:0;border:none;box-shadow:none;break-after:page}
+  .sf10:last-child{break-after:auto}
+  /* A final rating worked out from the terms is shown as a placeholder; on paper it is a grade like any other */
   .sf-cell::placeholder{color:#1B3A8C;opacity:1}
   .sf-in::placeholder{color:transparent}
   .sf-in:focus,.sf-cell:focus{background:transparent}

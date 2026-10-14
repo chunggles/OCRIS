@@ -4,6 +4,7 @@ import { OCR_STEPS } from '../data/constants'
 import { PageHeader } from '../components/ui/index'
 import StepPupilInfo  from './upload/StepPupilInfo'
 import StepQuality    from './upload/StepQuality'
+import StepArchive    from './upload/StepArchive'
 import StepProcessing from './upload/StepProcessing'
 import StepExtraction from './upload/StepExtraction'
 import StepValidation from './upload/StepValidation'
@@ -30,6 +31,7 @@ export default function UploadPage() {
   const resume   = ({ file, form, scanResult }) => { setQueue([{ file, form }]); setStepData({ scanResult }); setStep(4) }
   const goNext   = (added = {}) => { setStepData(d => ({ ...d, ...added })); setStep(s => Math.min(s + 1, SUCCESS_STEP)) }
   const goBack   = () => setStep(s => Math.max(s - 1, 1))
+  const leaveToStart = () => { setStepData({}); setStep(1) }
   const succeed  = (result) => { setSaved(list => [...list, result]); setStep(SUCCESS_STEP) }
   const nextForm = () => { setQueue(q => q.slice(1)); setStepData({}); setStep(2) }
   const leave    = (page) => { setStep(1); setQueue([]); setStepData({}); setSaved([]); nav(page) }
@@ -49,9 +51,12 @@ export default function UploadPage() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [working])
 
+  const archiveOnly = Boolean(data.form?.archive_only)
   const steps = {
     1: <StepPupilInfo  initial={{ queue }} onNext={start}/>,
-    2: <StepQuality    data={data} onNext={goNext} onBack={goBack}/>,
+    2: archiveOnly
+      ? <StepArchive data={data} onSuccess={succeed} onBack={leaveToStart}/>
+      : <StepQuality   data={data} onNext={goNext} onBack={goBack}/>,
     3: <StepProcessing data={data} onNext={goNext}/>,
     4: <StepExtraction data={data} onNext={goNext} onBack={goBack}/>,
     5: <StepValidation data={data} onNext={goNext} onBack={goBack}/>,
@@ -63,7 +68,7 @@ export default function UploadPage() {
   return (
     <div>
       <PageHeader title="Upload Form 137"/>
-      {!isSuccess && (
+      {!isSuccess && !(step > 1 && archiveOnly) && (
         <div className="step-tabs">
           {OCR_STEPS.map((label, i) => {
             const n = i + 1

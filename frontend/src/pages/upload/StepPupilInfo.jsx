@@ -34,9 +34,14 @@ const fileProblem = (file) => {
   return null
 }
 
-function validate(rows, classProblem) {
+function validate(rows, classProblem, archiveOnly) {
   if (classProblem) return classProblem
   if (rows.length === 0) return 'Please choose at least one scanned Form 137 file.'
+  if (archiveOnly) {
+    // Nothing is read from the form, so the name has to be typed
+    const unnamed = rows.filter(r => !r.last_name.trim() || !r.first_name.trim())
+    if (unnamed.length) return `Enter the last and first name, as nothing is read from an archived form, for: ${unnamed.map(r => r.file.name).join(', ')}.`
+  }
   // A name left blank is read from the form; it is checked again before saving
   const halfNamed = rows.filter(r => Boolean(r.last_name.trim()) !== Boolean(r.first_name.trim()))
   if (halfNamed.length) return `Enter both the last and first name, or leave both blank, for: ${halfNamed.map(r => r.file.name).join(', ')}.`
@@ -92,6 +97,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
   })
   const [rows,  setRows]  = useState(() => restored.map(({ file, form }) =>
     newRow(file, { last_name: form.last_name, first_name: form.first_name, lrn: form.lrn })))
+  const [archiveOnly, setArchiveOnly] = useState(() => Boolean(restored[0]?.form.archive_only))
   const [error, setError] = useState('')
 
   const picker = useClassPicker(cls.grade, cls.section)
@@ -118,7 +124,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
   }
 
   const handleNext = () => {
-    const problem = validate(rows, picker.problem)
+    const problem = validate(rows, picker.problem, archiveOnly)
     if (problem) { setError(problem); return }
     setError('')
     onNext({
@@ -126,7 +132,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
         file: r.file,
         form: {
           last_name: r.last_name.trim(), first_name: r.first_name.trim(), lrn: r.lrn.replace(/[\s-]/g, ''),
-          grade, section, school_year: cls.school_year,
+          grade, section, school_year: cls.school_year, archive_only: archiveOnly,
         },
       })),
     })
@@ -170,6 +176,10 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
 
         <Card title={rows.length ? `Scanned forms (${rows.length})` : 'Scanned forms'}>
           <Notice>{error}</Notice>
+          <label className="confirm-check" style={{ marginBottom: 10 }}>
+            <input type="checkbox" checked={archiveOnly} onChange={e => setArchiveOnly(e.target.checked)}/>
+            <span><strong>Archive only</strong> — store the form without scanning it for grades (names are required)</span>
+          </label>
           <DropZone onFiles={handleFiles}/>
           {rows.map((row, i) => (
             <FormRow key={row.id} row={row} number={i + 1}
@@ -177,7 +187,9 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
           ))}
           <div className="btn-row" style={{ marginTop: 12 }}>
             <Btn variant="primary" onClick={handleNext}>
-              {rows.length > 1 ? `Next: Check ${plural(rows.length, 'form')} →` : 'Next: Check image quality →'}
+              {archiveOnly
+                ? (rows.length > 1 ? `Next: Archive ${plural(rows.length, 'form')} →` : 'Next: Archive form →')
+                : rows.length > 1 ? `Next: Check ${plural(rows.length, 'form')} →` : 'Next: Check image quality →'}
             </Btn>
             {rows.length > 0 && <Btn onClick={() => setRows([])}>Clear all</Btn>}
           </div>

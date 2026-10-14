@@ -27,6 +27,7 @@ urlpatterns = [
     path('ocr/pending/',                  ocr.pending_scans, name='ocr-pending'),
     path('ocr/scans/<str:scan_id>/',      ocr.scan_detail,  name='scan-detail'),
     path('ocr/scans/<str:scan_id>/file/', ocr.scan_file,    name='scan-file'),
+    path('ocr/scans/<str:scan_id>/cancel/', ocr.cancel_scan, name='scan-cancel'),
     path('ocr/history/',                  ocr.scan_history, name='scan-history'),
 
     # Analytics
