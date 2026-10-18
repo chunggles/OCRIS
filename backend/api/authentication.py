@@ -1,3 +1,4 @@
+import hashlib
 import secrets
 from datetime import timedelta
 
@@ -35,10 +36,30 @@ def _mark_used(session, request):
         LoginSession.objects.filter(pk=session.pk).update(last_active=now)
 
 
+def session_key(cookie):
+    """What is stored for a sign-in cookie: its SHA-256, so a copy of the database cannot be used to sign in."""
+    return hashlib.sha256(cookie.encode('utf-8')).hexdigest()
+
+
+def purge_expired_sessions():
+    """Remove sessions that have ended but whose cookie never came back to be refused."""
+    now = timezone.now()
+    ended = LoginSession.objects.filter(created__lt=now - timedelta(hours=settings.TOKEN_TTL_HOURS))
+    if settings.IDLE_TIMEOUT_MINUTES:
+        ended |= LoginSession.objects.filter(last_active__lt=now - timedelta(minutes=settings.IDLE_TIMEOUT_MINUTES))
+    ended.delete()
+
+
 def start_session(user, request):
-    """A new login for the user on this device. Other devices stay signed in."""
-    return LoginSession.objects.create(
-        key=secrets.token_urlsafe(48), user=user, user_agent=request.META.get('HTTP_USER_AGENT', '')[:200])
+    """
+    A new login for the user on this device; returns (session, cookie value). Other devices stay
+    signed in. Sessions of anyone that have ended are cleared out at the same time.
+    """
+    purge_expired_sessions()
+    cookie = secrets.token_urlsafe(48)
+    session = LoginSession.objects.create(
+        key=session_key(cookie), user=user, user_agent=request.META.get('HTTP_USER_AGENT', '')[:200])
+    return session, cookie
 
 
 def require_request_header(request):
@@ -57,7 +78,7 @@ class CookieSessionAuthentication(BaseAuthentication):
         key = request.COOKIES.get(settings.AUTH_COOKIE_NAME)
         if not key:
             return None
-        session = LoginSession.objects.select_related('user').filter(key=key).first()
+        session = LoginSession.objects.select_related('user').filter(key=session_key(key)).first()
         if session is None:
             return None
         if session_expired(session):

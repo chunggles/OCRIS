@@ -5,6 +5,10 @@ inserting, moving or deleting a line breaks the chain from there, which verify()
 hash of each entry is also stored with its copy in MongoDB, so a file that is cut short or
 replaced shows too.
 
+A line left half-written by a crash is passed over: the next line follows the last whole line and
+records the half line's digest as `cut`, so the chain stays whole and verify() accepts that one
+line, but not one changed, removed or added later.
+
 This makes a change visible, not impossible: someone who can rewrite both the file and the
 database can recompute the chain. Copy the file to a log service or a machine the server cannot
 write to for that.
@@ -25,6 +29,11 @@ def _digest(line):
     """SHA-256 of a line's fields (everything but `hash`), written in one fixed form."""
     canonical = json.dumps(line, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
+
+
+def _text_digest(raw):
+    """SHA-256 of a line that cannot be read, as the bytes in the file without surrounding whitespace."""
+    return hashlib.sha256(raw.strip()).hexdigest()
 
 
 @contextmanager
@@ -49,37 +58,44 @@ def _locked(path):
                 fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
-def _tail(path):
-    """(last non-empty line as bytes or None, whether the file ends in the middle of a line)."""
+def _chain_end(path):
+    """
+    Where the next line joins the file, read from its end: (the `hash` of the last whole line, or
+    GENESIS before the chain began; the last line when a crash left it half-written, else None;
+    whether the file ends in the middle of a line). Lines that cannot be read are passed over.
+    """
     try:
-        with open(path, 'rb') as f:
-            f.seek(0, os.SEEK_END)
-            pos, tail = f.tell(), b''
-            while pos > 0:
-                step = min(TAIL_CHUNK, pos)
-                pos -= step
-                f.seek(pos)
-                tail = f.read(step) + tail
-                lines = tail.strip().splitlines()
-                if len(lines) > 1 or (pos == 0 and lines):
-                    return lines[-1], not tail.endswith(b'\n')
+        f = open(path, 'rb')
     except FileNotFoundError:
-        pass
-    return None, False
-
-
-def _hash_of(raw):
-    """The `hash` of a stored line; GENESIS for a line from before the chain began, or a broken one."""
-    try:
-        return json.loads(raw).get('hash') or GENESIS
-    except (ValueError, AttributeError):
-        return GENESIS
+        return GENESIS, None, False
+    with f:
+        f.seek(0, os.SEEK_END)
+        pos, rest = f.tell(), b''
+        cut, mid_line, at_end = None, False, True
+        while pos > 0:
+            step = min(TAIL_CHUNK, pos)
+            pos -= step
+            f.seek(pos)
+            pieces = (f.read(step) + rest).split(b'\n')
+            rest = pieces.pop(0) if pos else b''   # may go on in the part before
+            for raw in reversed(pieces):
+                end_piece, at_end = at_end, False   # the piece after the last newline: a line not finished
+                if end_piece:
+                    mid_line = bool(raw)
+                if not raw.strip():
+                    continue
+                try:
+                    return json.loads(raw).get('hash') or GENESIS, cut, mid_line
+                except (ValueError, AttributeError):
+                    if end_piece:
+                        cut = raw
+        return GENESIS, cut, mid_line
 
 
 def _numbered_lines(path):
-    """(line number, text) for each line of the file; nothing for a missing file."""
+    """(line number, bytes) for each line of the file; nothing for a missing file."""
     try:
-        with open(path, encoding='utf-8') as f:
+        with open(path, 'rb') as f:
             yield from enumerate(f, 1)
     except FileNotFoundError:
         return
@@ -94,11 +110,13 @@ def append(path, entry):
         return None
     path = Path(path)
     with _locked(path):
-        last, cut_off = _tail(path)
-        line = {**entry, 'prev': _hash_of(last) if last else GENESIS}
+        prev, cut, mid_line = _chain_end(path)
+        line = {**entry, 'prev': prev}
+        if cut is not None:
+            line['cut'] = _text_digest(cut)   # the half line a crash left just before this one
         line['hash'] = _digest(line)
         # a line cut off by a crash is ended first, so the new entry stays on a line of its own
-        text = ('\n' if cut_off else '') + json.dumps(line, ensure_ascii=False) + '\n'
+        text = ('\n' if mid_line else '') + json.dumps(line, ensure_ascii=False) + '\n'
         with open(path, 'a', encoding='utf-8', newline='\n') as f:
             f.write(text)
     return line['hash']
@@ -110,12 +128,15 @@ def verify(path, stored_hashes=()):
       entries    lines checked as part of the chain
       unchained  lines from before the chain began (written by an older OCRIS), not checkable
       problems   [(line number, what is wrong)]
+      cut_off    line numbers of lines a crash left half-written: recorded by the line after them,
+                 or the last line of the file, which the next entry will record
       missing    hashes in the database whose line is not in the file
       extra      entries in the file that the database does not hold, as {line, action, user, timestamp}
     """
-    problems, seen = [], {}   # seen: hash -> where and what the entry is
+    problems, cut_off, seen = [], [], {}   # seen: hash -> where and what the entry is
     entries = unchained = 0
     prev = GENESIS
+    unread = None   # (line number, digest) of a line that cannot be read, until the next line says what it is
     for number, raw in _numbered_lines(path):
         if not raw.strip():
             continue
@@ -123,8 +144,18 @@ def verify(path, stored_hashes=()):
             line = json.loads(raw)
             stored = line.pop('hash', None)
         except (ValueError, AttributeError):
-            problems.append((number, 'cannot be read as an entry'))
+            if unread:
+                problems.append((unread[0], 'cannot be read as an entry'))
+            unread = (number, _text_digest(raw), raw.endswith(b'\n'))
             continue
+        cut = line.get('cut') if stored is not None else None
+        if unread and cut == unread[1]:
+            cut_off.append(unread[0])
+        elif unread:
+            problems.append((unread[0], 'cannot be read as an entry'))
+        elif cut is not None:
+            problems.append((number, 'follows a line left half-written by a crash, but that line was removed or changed'))
+        unread = None
         if stored is None:
             if entries:
                 problems.append((number, 'has no hash, so it was added or rewritten after the chain began'))
@@ -138,11 +169,16 @@ def verify(path, stored_hashes=()):
         prev = stored
         entries += 1
         seen[stored] = {'line': number, **{key: line.get(key) for key in ('action', 'user', 'timestamp')}}
+    if unread and not unread[2]:   # the last line, unfinished: a crash, until the next entry records it
+        cut_off.append(unread[0])
+    elif unread:
+        problems.append((unread[0], 'cannot be read as an entry'))
     in_db = set(stored_hashes)
     return {
         'entries': entries,
         'unchained': unchained,
         'problems': problems,
+        'cut_off': cut_off,
         'missing': [h for h in stored_hashes if h not in seen],
         'extra': [summary for h, summary in seen.items() if h not in in_db],
     }

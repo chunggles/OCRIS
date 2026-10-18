@@ -60,6 +60,7 @@ export function AppProvider({ children }) {
     let reportedAt = Date.now()   // use up to this moment has been reported to the server
     const idleMs = idleMinutes * 60 * 1000
     const idleNow = () => idleMs > 0 && Date.now() - lastActivity.current >= idleMs
+    const idleNotice = `You were signed out after ${idleMinutes} minutes without use. Sign in again to continue.`
     const refresh = () => {
       if (document.visibilityState === 'hidden') return
       const used = lastActivity.current > reportedAt
@@ -67,14 +68,16 @@ export function AppProvider({ children }) {
       authAPI.refresh({ background: !used }).then(fresh => {
         if (stopped) return
         if (!fresh) {
-          logout(idleNow()
-            ? `You were signed out after ${idleMinutes} minutes without use. Sign in again to continue.`
-            : 'Your session has ended. Sign in again to continue.')
+          logout(idleNow() ? idleNotice : 'Your session has ended. Sign in again to continue.')
           return
         }
         if (used) reportedAt = askedAt
         setUser(current => (JSON.stringify(current) === JSON.stringify(fresh) ? current : fresh))
-      }).catch(() => {})   // offline: keep what we have
+      }).catch(() => {
+        // offline or a server error: keep what we have, unless the idle limit has passed, as the server
+        // has ended the session then anyway and the records must not stay on screen
+        if (!stopped && idleNow()) logout(idleNotice)
+      })
     }
     // with a short idle limit the refresh comes often enough to report use well before it
     const timer = setInterval(refresh, idleMs ? Math.min(USER_REFRESH_MS, idleMs / 3) : USER_REFRESH_MS)

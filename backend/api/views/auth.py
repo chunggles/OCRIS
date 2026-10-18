@@ -46,11 +46,11 @@ def login_view(request):
 
     user = s.validated_data['user']
     accounts.clear_failures(user.username)
-    session = start_session(user, request)
+    _, cookie = start_session(user, request)
     update_last_login(None, user)  # shown as "Last login" in User Management
     db.log_action('LOGIN', user.username, {'role': user.role, 'ip': ip})
     response = Response({'user': _own_account(user)})
-    response.set_cookie(settings.AUTH_COOKIE_NAME, session.key, max_age=int(settings.TOKEN_TTL_HOURS * 3600),
+    response.set_cookie(settings.AUTH_COOKIE_NAME, cookie, max_age=int(settings.TOKEN_TTL_HOURS * 3600),
                         httponly=True, **_cookie_args())
     return response
 

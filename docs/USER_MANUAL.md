@@ -36,7 +36,7 @@ To sign out, click **Sign out** at the top right. Always sign out on a shared co
 
 You stay signed in if you refresh the page. Refreshing in the middle of an upload does not lose a form that was already read: see **Unfinished uploads** under Step 1. After 12 hours you are asked to sign in again.
 
-**Signed out after 30 minutes without use.** If nobody types, clicks or scrolls in OCRIS for 30 minutes, it signs you out and the login screen says so. Typing a long form counts as use, but a form left half-typed for that long is lost, so save before you step away.
+**Signed out after 30 minutes without use.** If nobody types, clicks or scrolls in OCRIS for 30 minutes, it signs you out and the login screen says so, even if the network is down at the time. Typing a long form counts as use, but a form left half-typed for that long is lost, so save before you step away.
 
 **Signing out everywhere.** If you left OCRIS open on another computer, or think someone knows your password, open **Profile** and click **Sign out of every device**. Every computer and phone signed in as you returns to the login screen. Then change your password.
 

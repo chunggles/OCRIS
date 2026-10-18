@@ -1,5 +1,15 @@
 # OCRIS v3: Changelog
 
+## 2026-10-18 (fixes found in a review of the remaining weaknesses)
+
+- **Bug fixed: one half-written line broke the audit check for good.** If the server stopped while writing a line of `backend/logs/audit.jsonl`, the next entry started the chain over, so `verify_audit` (and every `maintenance` run) failed from then on, and nothing could clear it short of editing the file. The next entry now follows the last whole line and records the half line's SHA-256 (`cut`); `verify_audit` lists the half line as a note. The half line changed or removed afterwards, or an unreadable line that is not a crash, is still reported. `verify_audit` also no longer stops on a line cut in the middle of a letter. The test for this case now checks the whole result (it only looked at the first finding before, which is how the bug got through).
+- **Session keys are no longer stored as they are.** `ocris_login_sessions.key` now holds the SHA-256 of the cookie, so a copy of `db.sqlite3` or of a backup cannot be used to sign in. Migration `0004_hash_session_keys` converts the existing rows, so nobody is signed out.
+- **Ended sessions are cleared.** A session was deleted only when its cookie came back after it ended, so one whose browser never returned stayed in the table. Ended sessions are now deleted whenever anyone signs in.
+- **Idle sign-out without the server.** When the 30 minutes without use had passed but the server could not be reached (network down, server stopped), the app kept the records on screen until it could ask again. It now shows the login screen at once in that case too.
+- **Tests:** 3 new and 1 rewritten (111 in all, all passing). `vite build` succeeds. The idle sign-out without the server was not tried in a browser.
+- **Docs updated:** SECURITY.md (audit file, sessions), DATABASE.md (`ocris_login_sessions.key`), INSTALLATION.md (upgrade step), USER_MANUAL.md (idle sign-out). LIMITATIONS.md brought up to date (test count and areas, items 5, 8, 9 and 10 fixed, the OCR time), OCR_PIPELINE.md (one record per school year, the OCR time), WEAKNESSES_2026-10-11.md (new section 6, items 45 and 46).
+- **To apply it:** run `python manage.py migrate` once.
+
 ## 2026-10-18 (security: idle sign-out, sign out everywhere, audit file check)
 
 Three of the security gaps in [docs/WEAKNESSES_2026-10-11.md](docs/WEAKNESSES_2026-10-11.md). Two-step sign-in and encrypting the data inside MongoDB were left out for now, by decision.

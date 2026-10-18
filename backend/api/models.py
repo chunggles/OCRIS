@@ -62,6 +62,7 @@ class LoginSession(models.Model):
     One sign-in on one device. A user may have several at once; signing out ends only the one
     used. The key travels in an HttpOnly cookie, so scripts on the page cannot read it.
     """
+    # SHA-256 of the cookie value (authentication.session_key); the cookie itself is not stored
     key = models.CharField(max_length=64, primary_key=True)
     user = models.ForeignKey(OCRISUser, on_delete=models.CASCADE, related_name='login_sessions')
     created = models.DateTimeField(auto_now_add=True)

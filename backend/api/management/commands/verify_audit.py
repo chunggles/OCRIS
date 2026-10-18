@@ -28,6 +28,9 @@ class Command(BaseCommand):
 
         for number, problem in report['problems']:
             out.write(f'  Line {number} {problem}.')
+        for number in report['cut_off']:
+            out.write(f'  Note: line {number} was left half-written, as when the server stops while writing it; '
+                      'the entry was not saved.')
         if report['missing']:
             many = len(report['missing']) != 1
             out.write(f"  {len(report['missing'])} {'entries' if many else 'entry'} in the database {'are' if many else 'is'} "

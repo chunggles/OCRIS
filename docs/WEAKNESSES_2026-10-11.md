@@ -29,8 +29,8 @@ These cannot be settled without real scans.
 
 ## 4. Verification gaps
 
-- [ ] **45. Screens never clicked through in a browser:** multi-form upload, PDF upload, the SF10 fill-out form, editing a typed form and printing; also the security screens from section D (forced password change, forgot password, reset badge, Audit Log old and new values) and, from section E, the Unfinished uploads card and the background refresh of the signed-in user.
-- [ ] **46. No frontend tests, and no automated OCR tests.** The OCR accuracy checks were run by hand. (The backend has 96 automated tests.)
+- [ ] **45. Screens never clicked through in a browser:** uploading several forms at once with OCR, OCR of a PDF upload, printing on paper; also the security screens from section D (forced password change, forgot password, reset badge, Audit Log old and new values) and, from section E, the Unfinished uploads card and a teacher's class change showing without signing in again. Not tried either: the teacher role, phone width, and the idle sign-out while the server cannot be reached. **2026-10-18:** the SF10 fill-out form (terms and quarters), editing a typed form, the print view on screen, the archive-only upload (image and PDF) with every page that shows archived records, the idle sign-out and Sign out of every device were clicked through (see the CHANGELOG).
+- [ ] **46. No frontend tests, and no automated OCR tests.** The OCR accuracy checks were run by hand. (The backend has 111 automated tests.)
 
 ## 5. Known gaps not on the numbered list
 
@@ -42,3 +42,13 @@ These cannot be settled without real scans.
 - [ ] After a refresh, the not-yet-uploaded forms of a batch and corrections typed on step 5 are lost; only the form being worked on can be resumed.
 - [ ] The search box cannot use a database index, and analytics reads every record it covers; fine for one school, not for a very large archive.
 - [ ] Backups run only when scheduled (`manage.py maintenance`); a full restore on a second machine has not been tried, and a backup on the same disk does not survive that disk.
+
+## 6. Found in the review of 2026-10-18
+
+- [x] Migration `0003_session_last_active` was not applied to the working database, so every signed-in request failed. **Applied.**
+- [x] Four backups from before encryption (`.zip`, 7 to 11 October) were still in `backend/backups/`, holding every record, scan and the accounts file unencrypted. **Deleted**, after the newest `.zip.enc` was checked with `restore` (no `--yes`).
+- [x] The 2026-10-14 to 10-18 work was not committed, and the new migration and audit files were not tracked by git. **Committed.**
+- [x] One line half-written by a crash broke the audit chain for good, so `verify_audit` failed from then on. **Fixed.**
+- [x] Session keys were stored as they are, so a copy of `db.sqlite3` or a backup could be used to sign in, and ended sessions whose browser never came back were never deleted. **Fixed:** only a hash is stored (migration `0004`), and ended sessions are cleared at each sign-in.
+- [x] When the idle limit passed while the server could not be reached, the records stayed on screen. **Fixed.**
+- [x] A stray empty file `backend/file`, and out-of-date figures in LIMITATIONS.md (26 tests, items fixed since) and OCR_PIPELINE.md (all year blocks averaged together). **Removed and updated.**

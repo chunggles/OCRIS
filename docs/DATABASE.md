@@ -244,13 +244,13 @@ Model: `LoginSession`. One row per sign-in on one device (replaces the old one-t
 
 | Column | Type | Description |
 |---|---|---|
-| `key` | varchar(64), primary key | Random value kept in the `ocris_session` HttpOnly cookie |
+| `key` | varchar(64), primary key | SHA-256 (hex) of the random value kept in the `ocris_session` HttpOnly cookie; the value itself is not stored |
 | `user_id` | integer | The owner; a user can have several rows |
 | `created` | datetime | The session stops working `TOKEN_TTL_HOURS` (12) hours after this |
 | `last_active` | datetime | Last use (written at most once a minute); the session stops working `IDLE_TIMEOUT_MINUTES` (30) after this |
 | `user_agent` | varchar(200) | The browser that signed in |
 
-A row is deleted on sign-out (that device only), by "sign out everywhere", when the user changes their password (their other devices), when the OIC sets a new password, when it expires, and when the account is deleted.
+A row is deleted on sign-out (that device only), by "sign out everywhere", when the user changes their password (their other devices), when the OIC sets a new password, when it expires (when its cookie comes back, or at anyone's next sign-in), and when the account is deleted.
 
 ### `ocris_auth_attempts`
 

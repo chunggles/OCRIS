@@ -185,7 +185,7 @@ A form that was read but never saved is kept for `PENDING_SCAN_DAYS` (default 7)
 
 **Switching encryption on for an existing system:** add `DATA_ENCRYPTION_KEY` to `.env`, restart the server, then run `python manage.py encrypt_scans` once. After upgrading to this version, run `python manage.py migrate` once; everyone is signed out and signs in again (the old token table is no longer used).
 
-**Upgrading to the 2026-10-18 version:** run `python manage.py migrate` once (it adds the sessions' last-use time; until then signed-in requests fail). Sessions stay signed in.
+**Upgrading to the 2026-10-18 version:** run `python manage.py migrate` once (it adds the sessions' last-use time and replaces each stored session key by its hash; until then signed-in requests fail). Sessions stay signed in.
 
 To start over with an empty system, delete `db.sqlite3` and `media/scans/`, drop the MongoDB database, then run `migrate` and `seed.py` again.
 

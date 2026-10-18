@@ -837,6 +837,32 @@ class AccountTests(ApiTestCase):
         # Signing in again gives a working session
         self.assertEqual(self.signed_in('teacher').get('/api/auth/me/').status_code, 200)
 
+    def test_only_a_hash_of_the_session_cookie_is_stored(self):
+        import hashlib
+        cookie = self.login('teacher').cookies[settings.AUTH_COOKIE_NAME].value
+        stored = LoginSession.objects.get().key
+        self.assertEqual(stored, hashlib.sha256(cookie.encode()).hexdigest())
+        thief = self.browser()   # someone with a copy of the database
+        thief.cookies[settings.AUTH_COOKIE_NAME] = stored
+        self.assertEqual(thief.get('/api/auth/me/').status_code, 401)
+
+    def test_sessions_left_behind_are_cleared_at_the_next_sign_in(self):
+        self.signed_in('teacher')
+        self.signed_in('admin')
+        LoginSession.objects.filter(user=self.teacher).update(created=timezone.now() - timedelta(hours=settings.TOKEN_TTL_HOURS + 1))
+        LoginSession.objects.filter(user=self.admin).update(last_active=timezone.now() - timedelta(minutes=settings.IDLE_TIMEOUT_MINUTES + 1))
+        self.signed_in('oic')
+        self.assertEqual(list(LoginSession.objects.values_list('user__username', flat=True)), ['oic'])
+
+    def test_upgrade_keeps_existing_sessions(self):
+        import importlib
+        from django.apps import apps
+        LoginSession.objects.create(key='cookie-from-before', user=self.teacher)   # stored as it was
+        importlib.import_module('api.migrations.0004_hash_session_keys').hash_keys(apps, None)
+        client = self.browser()
+        client.cookies[settings.AUTH_COOKIE_NAME] = 'cookie-from-before'
+        self.assertEqual(client.get('/api/auth/me/').status_code, 200)
+
     def test_change_own_password(self):
         client = self.signed_in('teacher')
         url = '/api/auth/change-password/'
@@ -1322,13 +1348,24 @@ class SecurityTests(ApiTestCase):
 
     def test_audit_chain_survives_a_line_cut_off_by_a_crash(self):
         path = Path(self.media) / 'chain.jsonl'
-        audit_chain.append(path, {'action': 'A'})
-        with open(path, 'a', encoding='utf-8') as f:
-            f.write('{"action": "B", "us')   # the server stopped mid-line
-        audit_chain.append(path, {'action': 'C'})
-        self.assertEqual(path.read_text(encoding='utf-8').count('\n'), 3)   # C is on a line of its own
-        problems = audit_chain.verify(path)['problems']
-        self.assertEqual(problems[0], (2, 'cannot be read as an entry'))
+        hashes = [audit_chain.append(path, {'action': 'A'})]
+        with open(path, 'ab') as f:
+            f.write('{"action": "B", "user": "é'.encode('utf-8')[:-1])   # the server stopped mid-line, mid-letter
+        report = audit_chain.verify(path, hashes)
+        self.assertEqual((report['problems'], report['cut_off']), ([], [2]))   # nothing written after it yet
+        hashes += [audit_chain.append(path, {'action': 'C'}), audit_chain.append(path, {'action': 'D'})]
+        self.assertEqual(path.read_bytes().count(b'\n'), 4)   # C is on a line of its own
+        report = audit_chain.verify(path, hashes)
+        self.assertEqual((report['entries'], report['problems'], report['cut_off']), (3, [], [2]))
+        # the half line changed or removed afterwards still shows
+        lines = path.read_bytes().split(b'\n')
+        path.write_bytes(b'\n'.join(lines[:1] + [b'{"action": "X"'] + lines[2:]))
+        self.assertEqual(audit_chain.verify(path, hashes)['problems'], [(2, 'cannot be read as an entry')])
+        path.write_bytes(b'\n'.join(lines[:1] + lines[2:]))
+        self.assertIn('was removed or changed', audit_chain.verify(path, hashes)['problems'][0][1])
+        # an unreadable last line that was finished is not a crash
+        path.write_bytes(b'\n'.join(lines) + b'garbage\n')
+        self.assertEqual(audit_chain.verify(path, hashes)['problems'], [(5, 'cannot be read as an entry')])
 
     # idle sessions
     def test_a_session_unused_for_too_long_ends(self):

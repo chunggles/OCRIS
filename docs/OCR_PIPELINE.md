@@ -222,7 +222,7 @@ Module: `services/grading.py`. Runs when the record is saved.
 | 3 | The average is at least 75 and every Final is at least 75 | **Promoted** |
 | 4 | Otherwise | **Retained** |
 
-On a multi-year Form 137-A, the average and remarks are computed across every year block on the page, because all blocks are saved in one record.
+A form that holds several school years (an SF10-ES, or a multi-year Form 137-A) is saved as one record for one year: the block of the grade level chosen at upload, or the last block when none matches. The average and remarks use that block only; the other blocks are kept under `details.other_years` (since 2026-10-11; before, all blocks were averaged together).
 
 ## 11. Measured accuracy
 
@@ -234,7 +234,7 @@ These results were recorded during development and are reproduced from [CHANGELO
 | Correct grades auto-approved | 788 (76 of 90 on the original image) |
 | **Wrong grades auto-approved** | **0** |
 | Flagged for a person to check | 292 |
-| Time per upload | about 17 seconds |
+| Time per upload | about 17 seconds on this mockup (4 October). The 10 October review found 30 to 70 seconds per form, after the SF10-ES layout and the second reading of grainy or faded scans were added. |
 | Pupil details on the original image | all five fields correct |
 
 **Scope of these numbers.** They have not been measured on real scanned school records, on elementary Form 137 / SF10 layouts, or on handwritten grades. Because approval requires agreement between readings, unfamiliar layouts and handwriting are expected to be flagged for review more often, which increases manual work but should not introduce wrong grades. This expectation should be confirmed on real scans; see [LIMITATIONS.md](LIMITATIONS.md).
