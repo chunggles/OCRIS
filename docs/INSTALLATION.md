@@ -61,6 +61,7 @@ On macOS or Linux, use `source venv/bin/activate` and `cp .env.example .env`.
 | `PENDING_SCAN_DAYS` | No | `7` | Days an upload that was read but not saved is kept before the server deletes it (`0` keeps them) |
 | `BACKUP_KEEP` | No | `14` | Backup files `manage.py maintenance` leaves in `backend/backups/` |
 | `TOKEN_TTL_HOURS` | No | `12` | Hours a sign-in stays valid |
+| `IDLE_TIMEOUT_MINUTES` | No | `30` | Minutes a sign-in may go without use before it ends; `0` turns this off |
 | `LOGIN_MAX_ATTEMPTS` | No | `5` | Wrong passwords for one username before sign-in is refused |
 | `LOGIN_MAX_ATTEMPTS_PER_IP` | No | `20` | The same, counted per address |
 | `LOGIN_LOCKOUT_MINUTES` | No | `15` | How long failures count, and so how long a lock lasts |
@@ -147,13 +148,14 @@ python manage.py changepassword <username>
 | `python manage.py test` | `backend/` | Runs the automated tests. Needs MongoDB; uses a temporary database. |
 | `python manage.py backup` | `backend/` | Writes a dated zip of the accounts, MongoDB data and scans into `backend/backups/`. `--keep N` then deletes all but the newest N backups |
 | `python manage.py restore <file>` | `backend/` | Puts a backup back (accounts, MongoDB, scans). Without `--yes` it only lists what the backup holds. Takes a safety backup of the current data first |
-| `python manage.py maintenance` | `backend/` | The routine upkeep for a schedule: a backup (keeping `BACKUP_KEEP`, 14), removal of old unsaved uploads, and the MongoDB indexes |
+| `python manage.py maintenance` | `backend/` | The routine upkeep for a schedule: a backup (keeping `BACKUP_KEEP`, 14), removal of old unsaved uploads, the MongoDB indexes, and the audit file check |
+| `python manage.py verify_audit` | `backend/` | Checks that no line of the audit file was changed, added, moved or removed, and that it holds every entry the database holds; exit code 1 when it finds a change (see SECURITY.md) |
 | `python manage.py create_indexes` | `backend/` | Creates the MongoDB indexes that are missing (the server also does it by itself) |
 | `python manage.py cleanup_scans` | `backend/` | Deletes uploads never saved as a record and older than 7 days (`--days N`, `--dry-run`). The server also does this by itself (see below). With `--deleted-days N` it also purges scans kept after their record was deleted more than N days ago |
 | `python manage.py encrypt_scans` | `backend/` | Encrypts scans uploaded before `DATA_ENCRYPTION_KEY` was set. Run once after setting the key; safe to repeat |
 | `python manage.py decrypt_backup <file>` | `backend/` | Turns an encrypted backup (`.zip.enc`) back into a zip |
-| `python manage.py tidy_records` | `backend/` | One-off repair of older records: one spelling per subject, one school year per scanned form (`--dry-run` to preview) |
-| `python manage.py recompute_remarks` | `backend/` | Recalculates every record's average and remarks (`--dry-run` to preview) |
+| `python manage.py tidy_records` | `backend/` | One-off repair of older records: one spelling per subject, one school year per scanned form, marks the scans of forms archived before 2026-10-18, and marks forms typed in with three terms before then (`--dry-run` to preview) |
+| `python manage.py recompute_remarks` | `backend/` | Recalculates every record's average and remarks, except archived forms, which have none (`--dry-run` to preview) |
 | `npm run build` | `frontend/` | Builds the production frontend into `frontend/dist/` |
 | `npm run preview` | `frontend/` | Serves the built frontend locally |
 
@@ -170,7 +172,7 @@ To back the system up, run `python manage.py backup`, which copies the first thr
 
 ### Scheduled backups
 
-`python manage.py maintenance` backs up, keeps the newest `BACKUP_KEEP` (default 14) backups, removes old unsaved uploads and checks the indexes. OCRIS has no scheduler of its own, so ask the operating system to run it every night.
+`python manage.py maintenance` backs up, keeps the newest `BACKUP_KEEP` (default 14) backups, removes old unsaved uploads, checks the indexes and checks the audit file (a WARNING line means `verify_audit` found a change). OCRIS has no scheduler of its own, so ask the operating system to run it every night.
 
 - **Windows (Task Scheduler):** `schtasks /Create /SC DAILY /ST 22:00 /TN "OCRIS maintenance" /TR "cmd /c cd /d C:\path\to\OCRIS_v3\backend && venv\Scripts\python manage.py maintenance >> logs\maintenance.log 2>&1"`
 - **Linux (cron):** `0 22 * * * cd /srv/ocris/backend && venv/bin/python manage.py maintenance >> logs/maintenance.log 2>&1`
@@ -182,6 +184,8 @@ A backup that stays on the same disk does not protect against that disk failing:
 A form that was read but never saved is kept for `PENDING_SCAN_DAYS` (default 7) so that its user can carry on from the Upload page. After that the server deletes it, with its file, by itself: whenever someone uploads, at most once an hour. Set `PENDING_SCAN_DAYS=0` to keep them until `cleanup_scans` is run.
 
 **Switching encryption on for an existing system:** add `DATA_ENCRYPTION_KEY` to `.env`, restart the server, then run `python manage.py encrypt_scans` once. After upgrading to this version, run `python manage.py migrate` once; everyone is signed out and signs in again (the old token table is no longer used).
+
+**Upgrading to the 2026-10-18 version:** run `python manage.py migrate` once (it adds the sessions' last-use time; until then signed-in requests fail). Sessions stay signed in.
 
 To start over with an empty system, delete `db.sqlite3` and `media/scans/`, drop the MongoDB database, then run `migrate` and `seed.py` again.
 

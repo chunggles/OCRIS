@@ -22,7 +22,7 @@ from rest_framework.test import APIClient
 
 from api import db
 from api.models import AuthAttempt, LoginSession, OCRISUser
-from api.services import crypto, grading, maintenance, storage
+from api.services import audit_chain, crypto, grading, maintenance, storage
 
 TEST_DB = f'ocris_test_{uuid.uuid4().hex[:8]}'
 PASSWORD = 'test-pass-123'
@@ -477,6 +477,69 @@ class RecordTests(ApiTestCase):
         # the section filter narrows it further
         self.assertEqual(self.as_user(self.oic).get('/api/analytics/', {'section': 'Orchid'}).data['subject_means'], {'English': 60.0})
 
+    def test_analytics_never_averages_terms_with_quarters(self):
+        self.make_record(grades={'English': {'Q1': '80', 'Q2': '80', 'Q3': '80', 'Q4': '80', 'final': '80'}})
+        for name, q in (('Reyes, Ana', '90'), ('Cruz, Jose', '94')):
+            self.make_record(name=name, grading_period='term', grades={'English': {'Q1': q, 'Q2': q, 'Q3': q, 'Q4': 'N/A', 'final': q}})
+        client = self.as_user(self.oic)
+        data = client.get('/api/analytics/').data   # most records use terms
+        self.assertEqual((data['grading_period'], data['period_counts']), ('term', {'quarter': 1, 'term': 2}))
+        self.assertEqual(data['subjects'][0]['means'], {'Q1': 92.0, 'Q2': 92.0, 'Q3': 92.0, 'final': 88.0})   # final: all three
+        self.assertEqual(data['period_means'], {'Q1': 92.0, 'Q2': 92.0, 'Q3': 92.0, 'final': 88.0})
+        quarters = client.get('/api/analytics/', {'period': 'quarter'}).data
+        self.assertEqual(quarters['grading_period'], 'quarter')
+        self.assertEqual(quarters['subjects'][0]['means'], {'Q1': 80.0, 'Q2': 80.0, 'Q3': 80.0, 'Q4': 80.0, 'final': 88.0})
+        self.assertEqual(quarters['total_records'], 3)
+
+    def test_archived_forms_are_left_out_of_analytics(self):
+        self.make_record()
+        for n in range(3):
+            self.make_record(name=f'Reyes, Pupil {n}', grades={}, general_average=None, remarks='', details={'archive_only': True})
+        data = self.as_user(self.oic).get('/api/analytics/', {'grade': 'Grade 6'}).data
+        self.assertEqual(data['total_records'], 1)
+        self.assertEqual(data['pass_rates'], {'Grade 6': 100.0})   # not 25.0
+        self.assertEqual(self.as_user(self.oic).get('/api/records/').data['total'], 4)   # still listed as records
+
+    def test_archive_only_upload_stores_the_form_without_reading_it(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        def upload(**fields):
+            data = {'file': SimpleUploadedFile('form.png', tiny_png(), 'image/png'), 'archive_only': 'true',
+                    'grade_level': 'Grade 6', 'section': 'Sampaguita', 'school_year': '1998-1999', **fields}
+            return self.as_user(self.teacher).post('/api/ocr/upload/', data, format='multipart')
+
+        with patch('api.views.ocr.read_scan', side_effect=AssertionError('OCR must not run')):
+            self.assertEqual(upload(pupil_name='  ').status_code, 400)   # the name cannot be read from the form
+            self.assertEqual(db.scans_col().count_documents({}), 0)
+            response = upload(pupil_name='Pulonan, Ellen Joy')
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['archived'])
+        record = db.get_record(response.data['record_id'])
+        self.assertEqual((record['grades'], record['general_average'], record['remarks']), ({}, None, ''))
+        self.assertEqual(record['details'], {'archive_only': True})
+        scan = db.get_scan(response.data['scan_id'])
+        self.assertEqual((scan['outcome'], scan['record_id'], scan['archive_only']), ('saved', record['record_id'], True))
+        self.assertIsNotNone(storage.find_scan_file(scan['filename']))
+        entry = db.audit_col().find_one({'action': 'UPLOAD'})
+        self.assertTrue(entry['details']['archive_only'])
+        self.assertEqual(self.as_user(self.teacher).get('/api/ocr/pending/').data['results'], [])   # nothing left to finish
+
+    def test_archived_record_stays_without_grades_when_edited(self):
+        record_id = self.make_record(scan_id=self.make_scan(), grades={}, general_average=None, remarks='',
+                                     details={'archive_only': True})
+        url = f'/api/records/{record_id}/update/'
+        client = self.as_user(self.oic)
+        # Record Detail sends the (empty) grade sheet with every edit: the remarks must not become Incomplete
+        response = client.patch(url, {'pupil_name': 'Pulonan, Ellen Joy', 'grades': {}}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual((response.data['pupil_name'], response.data['general_average'], response.data['remarks']),
+                         ('Pulonan, Ellen Joy', None, ''))
+        self.assertEqual(client.patch(url, {'grades': _grades(English='88')}, format='json').status_code, 400)
+        self.assertEqual(client.patch(url, {'grades': {}}, format='json').status_code, 400)   # nothing left to change
+        client.patch(url, {'details': {'sex': 'F'}}, format='json')
+        self.assertEqual(db.get_record(record_id)['details'], {'sex': 'F', 'archive_only': True})
+        self.assertEqual(db.get_record(record_id)['grades'], {})
+
     def test_dates_are_marked_as_utc(self):
         record_id = self.make_record()
         client = self.as_user(self.oic)
@@ -490,6 +553,7 @@ class RecordTests(ApiTestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(first.data['general_average'], '84.0')
         self.assertEqual(first.data['remarks'], 'Promoted')
+        self.assertEqual(db.get_record(first.data['record_id'])['grading_period'], 'quarter')
         second = client.post('/api/ocr/validate/', self.validate_payload(scan_id), format='json')
         self.assertEqual(second.status_code, 409)
         self.assertEqual(db.records_col().count_documents({}), 1)
@@ -535,7 +599,7 @@ class RecordTests(ApiTestCase):
         record = db.get_record(response.data['record_id'])
         self.assertEqual((record['general_average'], record['remarks']), ('85.0', 'Promoted'))
         self.assertEqual(record['grades']['English'], {'Q1': '88', 'Q2': 'N/A', 'Q3': 'N/A', 'Q4': 'N/A', 'final': '90'})
-        self.assertEqual((record['uploaded_by'], record['scan_id']), ('teacher', ''))
+        self.assertEqual((record['uploaded_by'], record['scan_id'], record['grading_period']), ('teacher', '', 'quarter'))
         # The sheet's other details are kept, trimmed and cut to a bounded size; unknown keys are dropped
         self.assertEqual(record['details']['sex'], 'F')
         self.assertEqual(len(record['details']['middle_name']), 100)
@@ -544,6 +608,25 @@ class RecordTests(ApiTestCase):
         self.assertEqual(record['details']['blocks'][0]['rows'][0], {'subject': 'English', 'Q1': '88'})
         self.assertNotIn('junk', record['details'])
         self.assertEqual(self.as_user(self.teacher).get('/api/records/').data['total'], 1)  # the teacher sees it
+
+    def test_record_kept_in_terms_has_no_q4(self):
+        client = self.as_user(self.oic)
+        terms = {'English': {'Q1': '88', 'Q2': '90', 'Q3': '92', 'final': '90'}}
+        self.assertEqual(client.post('/api/records/create/', self.filled_form(grading_period='trimester'), format='json').status_code, 400)
+        with_q4 = {'English': {**terms['English'], 'Q4': '91'}}
+        refused = client.post('/api/records/create/', self.filled_form(grading_period='term', grades=with_q4), format='json')
+        self.assertEqual((refused.status_code, refused.data['detail']), (400, 'English: a record kept in terms has no Q4 grade.'))
+        created = client.post('/api/records/create/', self.filled_form(grading_period='term', grades=terms), format='json')
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual((created.data['grading_period'], created.data['grades']['English']['Q4']), ('term', 'N/A'))
+        url = f"/api/records/{created.data['record_id']}/update/"
+        self.assertEqual(client.patch(url, {'grades': with_q4}, format='json').status_code, 400)
+        # a quarterly record keeps its Q4, and cannot become a term record while it has one
+        quarterly = self.make_record(name='Reyes, Ana', grades=_grades(English='88') | {'Math': {'Q4': '80', 'final': '80'}})
+        url = f'/api/records/{quarterly}/update/'
+        self.assertEqual(client.patch(url, {'grading_period': 'term'}, format='json').status_code, 400)
+        self.assertEqual(client.patch(url, {'grading_period': 'term', 'grades': terms}, format='json').status_code, 200)
+        self.assertEqual(db.get_record(quarterly)['grading_period'], 'term')
 
     def test_filled_out_form_rejects_bad_input(self):
         client = self.as_user(self.teacher)
@@ -898,6 +981,38 @@ class CommandTests(ApiTestCase):
         self.assertEqual(db.get_record(stale)['remarks'], 'Incomplete')
         self.assertEqual(db.get_record(fine)['remarks'], 'Promoted')
 
+    def test_repair_commands_leave_archived_records_alone(self):
+        old_scan = self.make_scan()   # archived before scans carried the flag
+        archived = self.make_record(scan_id=old_scan, grades={}, general_average=None, remarks='', details={'archive_only': True})
+        read_scan = self.make_scan()
+        self.make_record(name='Reyes, Ana', scan_id=read_scan)
+        call_command('recompute_remarks', stdout=StringIO())
+        self.assertEqual((db.get_record(archived)['remarks'], db.get_record(archived)['general_average']), ('', None))
+        call_command('tidy_records', '--dry-run', stdout=StringIO())
+        self.assertFalse(db.get_scan(old_scan)['archive_only'])
+        out = StringIO()
+        call_command('tidy_records', stdout=out)
+        self.assertIn('Marked 1 archived scan(s).', out.getvalue())
+        self.assertTrue(db.get_scan(old_scan)['archive_only'])
+        self.assertFalse(db.get_scan(read_scan)['archive_only'])
+        self.assertEqual(db.get_record(archived)['remarks'], '')
+
+    def test_tidy_records_marks_forms_typed_in_terms(self):
+        typed = {'grades': _grades(English='88'), 'details': {'certifications': [{}], 'blocks': []}}
+        two_page = self.make_record(**typed)
+        older = self.make_record(name='Reyes, Ana', details={'sex': 'F'})
+        scanned = self.make_record(name='Cruz, Jose', scan_id=self.make_scan(), **typed)
+        for record_id in (two_page, older, scanned):   # saved before records carried grading_period
+            db.records_col().update_one({'record_id': record_id}, {'$unset': {'grading_period': ''}})
+        call_command('tidy_records', '--dry-run', stdout=StringIO())
+        self.assertNotIn('grading_period', db.get_record(two_page))
+        out = StringIO()
+        call_command('tidy_records', stdout=out)
+        self.assertIn('Marked 1 typed record(s) as kept in terms.', out.getvalue())
+        self.assertEqual(db.get_record(two_page)['grading_period'], 'term')
+        self.assertNotIn('grading_period', db.get_record(older))
+        self.assertNotIn('grading_period', db.get_record(scanned))
+
     @override_settings(DATA_ENCRYPTION_KEYS=[])   # a key in .env would make the backup .zip.enc
     def test_backup_writes_a_zip(self):
         self.make_record()
@@ -1134,22 +1249,111 @@ class SecurityTests(ApiTestCase):
         entry = db.audit_col().find_one({'action': 'EDIT_USER'})['details']
         self.assertEqual(entry['changes']['assigned_section'], {'old': 'Sampaguita', 'new': 'Rosal'})
 
+    def audit_file(self):
+        path = Path(self.media) / 'audit.jsonl'
+        self.enterContext(self.settings(AUDIT_LOG_FILE=path))
+        return path
+
+    def check_audit(self):
+        """(passed, report text) of manage.py verify_audit."""
+        out = StringIO()
+        try:
+            call_command('verify_audit', stdout=out)
+            return True, out.getvalue()
+        except CommandError as e:
+            return False, out.getvalue() + str(e)
+
     def test_every_audit_entry_is_also_written_to_a_file(self):
         import json
-        import logging
-        path = Path(self.media) / 'audit.jsonl'
-        handler = logging.FileHandler(path, encoding='utf-8')
-        handler.setFormatter(logging.Formatter('%(message)s'))
-        logger = logging.getLogger('ocris.audit')
-        logger.addHandler(handler)
-        self.addCleanup(handler.close)
-        self.addCleanup(logger.removeHandler, handler)
+        path = self.audit_file()
         db.log_action('LOGIN', 'teacher', {'role': 'TEACHER'})
+        db.log_action('LOGOUT', 'teacher')
+        first, second = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+        self.assertEqual((first['action'], first['user'], first['details']), ('LOGIN', 'teacher', {'role': 'TEACHER'}))
+        self.assertTrue(first['timestamp'].endswith('Z'))
+        self.assertEqual((first['prev'], second['prev']), ('', first['hash']))   # each line holds the one before
+        self.assertEqual(db.audit_col().find_one({'action': 'LOGOUT'})['hash'], second['hash'])
+        self.assertNotIn('hash', self.as_user(self.oic).get('/api/audit/').data['results'][0])
+        self.assertEqual(self.check_audit()[0], True)
         db.audit_col().delete_many({})   # the database is wiped...
-        handler.flush()
-        line = json.loads(path.read_text(encoding='utf-8').splitlines()[-1])   # ...the file still has the entry
-        self.assertEqual((line['action'], line['user'], line['details']), ('LOGIN', 'teacher', {'role': 'TEACHER'}))
-        self.assertTrue(line['timestamp'].endswith('Z'))
+        passed, report = self.check_audit()   # ...the file still has the entries, and says they are not in the database
+        self.assertTrue(passed)
+        self.assertIn('2 entries are in the file but not in the database', report)
+
+    def test_verify_audit_finds_changed_removed_and_added_lines(self):
+        import json
+        path = self.audit_file()
+        path.write_text('{"action": "LOGIN", "user": "old", "details": {}}\n', encoding='utf-8')   # written before the chain
+        for n in range(4):
+            db.log_action('EDIT', 'admin', {'record_id': f'REC-{n}'})
+        passed, report = self.check_audit()
+        self.assertTrue(passed, report)
+        self.assertIn('4 entries checked; 1 older line(s)', report)
+        good = path.read_text(encoding='utf-8')
+        lines = good.splitlines()
+
+        def check_with(text):
+            path.write_text(text, encoding='utf-8')
+            return self.check_audit()
+
+        edited = json.loads(lines[2])
+        edited['details']['record_id'] = 'REC-X'
+        passed, report = check_with('\n'.join(lines[:2] + [json.dumps(edited)] + lines[3:]) + '\n')
+        self.assertFalse(passed)
+        self.assertIn('Line 3 was changed after it was written.', report)
+        passed, report = check_with('\n'.join(lines[:2] + lines[3:]) + '\n')   # a line removed from the middle
+        self.assertIn('Line 3 does not follow the line before it', report)
+        passed, report = check_with('\n'.join(lines[:-1]) + '\n')   # the end cut off
+        self.assertFalse(passed)
+        self.assertIn('1 entry in the database is not in the file', report)
+        passed, report = check_with(good + '{"action": "LOGIN", "user": "intruder", "details": {}}\n')
+        self.assertIn('Line 6 has no hash', report)
+        self.assertFalse(check_with('')[0])   # the file replaced by an empty one
+        path.write_text(good, encoding='utf-8')
+        self.assertTrue(self.check_audit()[0])
+
+    def test_audit_chain_holds_with_writers_at_once(self):
+        from concurrent.futures import ThreadPoolExecutor
+        path = Path(self.media) / 'chain.jsonl'
+        with ThreadPoolExecutor(8) as pool:
+            hashes = list(pool.map(lambda n: audit_chain.append(path, {'action': 'TEST', 'n': n}), range(40)))
+        report = audit_chain.verify(path, hashes)
+        self.assertEqual((report['entries'], report['problems'], report['missing']), (40, [], []))
+
+    def test_audit_chain_survives_a_line_cut_off_by_a_crash(self):
+        path = Path(self.media) / 'chain.jsonl'
+        audit_chain.append(path, {'action': 'A'})
+        with open(path, 'a', encoding='utf-8') as f:
+            f.write('{"action": "B", "us')   # the server stopped mid-line
+        audit_chain.append(path, {'action': 'C'})
+        self.assertEqual(path.read_text(encoding='utf-8').count('\n'), 3)   # C is on a line of its own
+        problems = audit_chain.verify(path)['problems']
+        self.assertEqual(problems[0], (2, 'cannot be read as an entry'))
+
+    # idle sessions
+    def test_a_session_unused_for_too_long_ends(self):
+        from api.models import LoginSession
+        client = self.signed_in('teacher')
+        me = client.get('/api/auth/me/')
+        self.assertEqual(me.data['idle_timeout_minutes'], settings.IDLE_TIMEOUT_MINUTES)
+        idle = timedelta(minutes=settings.IDLE_TIMEOUT_MINUTES)
+        LoginSession.objects.update(last_active=timezone.now() - idle + timedelta(minutes=2))
+        # the app's own refresh does not count as use...
+        self.assertEqual(client.get('/api/auth/me/', {'background': '1'}).status_code, 200)
+        self.assertLess(LoginSession.objects.get().last_active, timezone.now() - idle + timedelta(minutes=3))
+        # ...a request the user made does
+        self.assertEqual(client.get('/api/records/').status_code, 200)
+        self.assertGreater(LoginSession.objects.get().last_active, timezone.now() - timedelta(minutes=1))
+        LoginSession.objects.update(last_active=timezone.now() - idle - timedelta(minutes=1))
+        self.assertEqual(client.get('/api/auth/me/').status_code, 401)
+        self.assertFalse(LoginSession.objects.exists())   # the session is gone, not just refused
+        with self.settings(IDLE_TIMEOUT_MINUTES=0):   # 0 turns the limit off
+            client = self.signed_in('teacher')
+            LoginSession.objects.update(last_active=timezone.now() - timedelta(hours=5))
+            self.assertEqual(client.get('/api/auth/me/').status_code, 200)
+
+    def test_login_response_tells_the_app_the_idle_limit(self):
+        self.assertEqual(self.login('teacher').data['user']['idle_timeout_minutes'], settings.IDLE_TIMEOUT_MINUTES)
 
     # 37. uploads
     def post_file(self, name, content, url='/api/ocr/upload/'):

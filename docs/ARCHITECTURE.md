@@ -57,7 +57,7 @@ backend/
     password_validators.py  letters-and-numbers password rule
     permissions.py          IsOIC, IsOICOrAdmin
     tests.py                automated tests
-    management/commands/    backup, restore, maintenance, create_indexes, cleanup_scans, decrypt_backup, encrypt_scans, recompute_remarks, tidy_records
+    management/commands/    backup, restore, maintenance, create_indexes, cleanup_scans, decrypt_backup, encrypt_scans, recompute_remarks, tidy_records, verify_audit
     serializers.py          login, user, and validation payloads
     urls.py                 all /api/ routes
     constants.py            passing grade, N/A handling, remark names

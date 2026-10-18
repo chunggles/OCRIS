@@ -105,7 +105,9 @@ Ends every session of the user. Response `200`. Writes `LOGOUT` with `all_device
 
 ### GET `/auth/me/`
 
-Returns the current user as a [user object](#user-object). The frontend calls this when the page opens to restore the session; `401` means nobody is signed in.
+Returns the current user as a [user object](#user-object), plus `idle_timeout_minutes` (the login response and `/auth/change-password/` carry it too). The frontend calls this when the page opens to restore the session, and every few minutes; `401` means nobody is signed in.
+
+Every authenticated request counts as use of the session, which ends after `IDLE_TIMEOUT_MINUTES` without use. A request with `?background=1` does not count: the app adds it to its automatic check when nobody typed or clicked since the last one.
 
 ### POST `/auth/forgot-password/`
 
@@ -180,7 +182,8 @@ Saves a record typed into the on-screen SF10-ES. No scan is involved, so the rec
   "section": "Athena",
   "school_year": "2025-2026",
   "class_adviser": "Gloria D. Ramos",
-  "grades": { "English": { "Q1": "88", "Q2": "90", "Q3": "92", "Q4": "94", "final": "91" } },
+  "grades": { "English": { "Q1": "88", "Q2": "90", "Q3": "92", "final": "90" } },
+  "grading_period": "term",
   "details": {
     "name_ext": "", "middle_name": "Antonio", "birthdate": "07/28/2016", "sex": "F",
     "eligibility": { "kinder_progress_report": true, "school_name": "…" },
@@ -191,7 +194,7 @@ Saves a record typed into the on-screen SF10-ES. No scan is involved, so the rec
 
 `pupil_name`, `grade_level`, `section`, `school_year` and at least one subject in `grades` are required. Each grade is a number from 0 to 100 or left out. The general average and remarks are calculated by the server. A teacher may only send their assigned class.
 
-The top-level class and `grades` are those of the last year block that has grades on the sheet. `details` is optional and holds the rest of the sheet, including all eight year blocks as typed (`blocks`), the three certification boxes (`certifications`) and `total_pages`, so the form can be shown again. A typed form sends its three terms as `Q1` to `Q3`; `Q4` is stored as `N/A`. Only the keys shown are kept; text is cut to 100 characters, lists and objects to 40 entries.
+The top-level class and `grades` are those of the last year block that has grades on the sheet. `details` is optional and holds the rest of the sheet, including all eight year blocks as typed (`blocks`), the three certification boxes (`certifications`) and `total_pages`, so the form can be shown again. `grading_period` is `"term"` (three terms, sent as `Q1` to `Q3`; `Q4` is stored as `N/A` and a Q4 grade gets `400`) or `"quarter"` (four quarters); it defaults to `"quarter"`, and anything else gets `400`. Only the keys shown are kept; text is cut to 100 characters, lists and objects to 40 entries.
 
 Response `201` with the record, `400` for invalid input, `403` for a teacher filing under another class. Writes an `ENCODE` audit entry.
 
@@ -207,8 +210,9 @@ The body holds the fields to change. Only these are accepted; anything else is i
 | `lrn`, `class_adviser` | Text; may be blank |
 | `grades` | The whole grade sheet: `{subject: {Q1, Q2, Q3, Q4, final}}`. A missing or empty value is stored as `N/A`. On a typed-in form, each grade must be a number from 0 to 100 and at least one subject is required. |
 | `details` | The whole details object, as in `POST /records/create/`. |
+| `grading_period` | `"term"` or `"quarter"`, as in `POST /records/create/`. A record kept in terms cannot hold a Q4 grade, so a quarterly record with Q4 grades becomes a term record only together with a `grades` without them. |
 
-When `grades` is sent, `general_average` and `remarks` are recalculated; they cannot be set directly. Response `200`: the updated record. Response `400` if nothing valid was sent or a value breaks a rule. Writes an `EDIT` audit entry.
+When `grades` is sent, `general_average` and `remarks` are recalculated; they cannot be set directly. An archive-only record (`details.archive_only`) keeps no grades: an empty `grades` is ignored (its average and remarks stay empty), any other `grades` gets `400`, and `details.archive_only` is kept when `details` is sent. Response `200`: the updated record. Response `400` if nothing valid was sent or a value breaks a rule. Writes an `EDIT` audit entry.
 
 ### DELETE `/records/<record_id>/delete/`
 
@@ -374,7 +378,7 @@ What the reader found on an unsaved upload: `scan_id`, `original_name`, `pupil_n
 
 ### GET `/analytics/`
 
-Descriptive figures for the saved records. Optional filters: `school_year`, `grade`, `section`. A teacher is always limited to their own class. Blank and unreadable grades are left out of every figure.
+Descriptive figures for the saved records. Optional filters: `school_year`, `grade`, `section`, and `period` (`quarter` or `term`, see below). A teacher is always limited to their own class. Blank and unreadable grades are left out of every figure. Archive-only records (`details.archive_only`) are left out altogether, including from `total_records`.
 
 ```json
 {
@@ -389,6 +393,8 @@ Descriptive figures for the saved records. Optional filters: `school_year`, `gra
     }
   ],
   "period_means": { "Q1": 83.5, "Q2": 84.0, "Q3": 84.4, "Q4": 85.5, "final": 84.5 },
+  "grading_period": "quarter",
+  "period_counts": { "quarter": 38, "term": 2 },
   "intervention_flags": [ { "subject": "Mathematics", "mean": 74.0, "grade_level": "All" } ],
   "pending_scans": 2
 }
@@ -400,6 +406,8 @@ Descriptive figures for the saved records. Optional filters: `school_year`, `gra
 | `pass_rates` | Per grade level, the share of records whose general average is 75 or higher |
 | `subjects` | Per subject: its mean for each grading period and the final rating, how many final ratings there are (`graded`), and how many pass and fail. The subjects with the most failing final ratings come first. |
 | `period_means` | Mean over every subject for each grading period |
+| `grading_period` | Whose periods the means above are: `quarter` (`Q1` to `Q4`) or `term` (`Q1` to `Q3`). Quarters and terms are never averaged together: the period means come only from records of this kind, the one asked for with `period`, or else the kind most of the matching records use. Final ratings, pass rates and flags come from every record. |
+| `period_counts` | How many matching records are kept in quarters and in terms |
 | `intervention_flags` | Subjects whose mean final rating is below 75 |
 | `pending_scans` | Scans uploaded but never saved as a record |
 

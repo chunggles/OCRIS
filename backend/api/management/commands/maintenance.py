@@ -3,12 +3,12 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management import call_command
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = ('Back up everything, keep only the newest backups, delete abandoned uploads and make sure the '
-            'MongoDB indexes exist. Schedule this daily (see docs/INSTALLATION.md).')
+    help = ('Back up everything, keep only the newest backups, delete abandoned uploads, make sure the '
+            'MongoDB indexes exist and check the audit file. Schedule this daily (see docs/INSTALLATION.md).')
 
     def add_arguments(self, parser):
         parser.add_argument('--out', default=str(Path(settings.BASE_DIR) / 'backups'), help='Folder for the backups.')
@@ -20,3 +20,7 @@ class Command(BaseCommand):
             call_command('backup', out=out, keep=keep, stdout=self.stdout)
         call_command('cleanup_scans', days=settings.PENDING_SCAN_DAYS or 7, stdout=self.stdout)
         call_command('create_indexes', stdout=self.stdout)
+        try:
+            call_command('verify_audit', stdout=self.stdout)
+        except CommandError as e:   # reported, but the rest of the upkeep has already run
+            self.stderr.write(f'WARNING: {e} Run python manage.py verify_audit for the details.')

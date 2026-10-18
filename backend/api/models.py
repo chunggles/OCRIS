@@ -1,5 +1,6 @@
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 
 class OCRISUser(AbstractUser):
@@ -64,6 +65,8 @@ class LoginSession(models.Model):
     key = models.CharField(max_length=64, primary_key=True)
     user = models.ForeignKey(OCRISUser, on_delete=models.CASCADE, related_name='login_sessions')
     created = models.DateTimeField(auto_now_add=True)
+    # When the user last did something; the session ends after IDLE_TIMEOUT_MINUTES without use
+    last_active = models.DateTimeField(default=timezone.now)
     user_agent = models.CharField(max_length=200, blank=True, default='')
 
     class Meta:

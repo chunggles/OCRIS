@@ -33,8 +33,9 @@ OCRIS stores pupils' personal information and academic records, which are person
 
 - A successful login creates a **session** (`ocris_login_sessions`) whose random key is sent in the **`ocris_session` cookie**: `HttpOnly` (scripts on the page cannot read it, so a malicious script cannot steal it), `Secure` whenever HTTPS is required, and `SameSite` set by `AUTH_COOKIE_SAMESITE` (`None` with HTTPS so a site and a server on different domains can talk, `Lax` for local development). The browser holds no token in `localStorage`.
 - The key is not returned in any response body.
-- **One session per sign-in.** A user may be signed in on several devices. **Sign out** ends only that device; `POST /api/auth/logout-all/` ends all of them. Changing your password ends the other devices; the OIC setting a user's password ends all of theirs.
+- **One session per sign-in.** A user may be signed in on several devices. **Sign out** ends only that device; **Sign out of every device** on the Profile page (`POST /api/auth/logout-all/`) ends all of them, and the other devices return to the login screen at their next check. Changing your password ends the other devices; the OIC setting a user's password ends all of theirs.
 - A session **expires 12 hours after sign-in** (`TOKEN_TTL_HOURS`). Any request with a missing, unknown or expired cookie gets `401`, and the app returns to the login screen.
+- A session also **ends after 30 minutes without use** (`IDLE_TIMEOUT_MINUTES`; `0` turns it off), so a computer left signed in does not stay open. Use means typing, clicking, scrolling or touching anywhere in the app, not only requests: someone typing a long form makes no requests, so the app's own check of the signed-in user (every few minutes, sooner for a short limit) tells the server whether there was any use since the last one, and a check with no use (`?background=1`) does not extend the session. When the limit has passed without use the app asks the server at once and shows the login screen with "You were signed out after 30 minutes without use". In practice the session ends 30 to about 34 minutes after the last use.
 
 ### Forged requests
 
@@ -114,7 +115,11 @@ The following actions are written to the `audit_log` collection with the usernam
 
 The log is visible to OIC and Admin Staff on the Audit Log page. The application has no function to edit or delete log entries.
 
-**A second copy outside the database.** Every entry is first appended as one JSON line to `backend/logs/audit.jsonl` (`AUDIT_LOG_FILE`), then stored in MongoDB. If the database is wiped or replaced, the file still holds the trail. It must be kept on storage that a deploy does not wipe, and copied with each backup. The file is plain text appended to by the server; someone with access to the server's disk could alter it, so for stronger protection ship it to a separate log service.
+**A second copy outside the database.** Every entry is first appended as one JSON line to `backend/logs/audit.jsonl` (`AUDIT_LOG_FILE`), then stored in MongoDB. If the database is wiped or replaced, the file still holds the trail. It must be kept on storage that a deploy does not wipe, and copied with each backup.
+
+**Changes to the file show.** The file is a hash chain: each line holds the hash of the line before it (`prev`) and its own (`hash`, SHA-256 of the line). The same hash is stored with the entry in MongoDB. `python manage.py verify_audit` (also run by `maintenance`) reports a line that was changed, a line removed, added or moved, a line without a hash after the chain began, and entries the database holds that the file has lost (the end cut off, or the file replaced); it exits with code 1 when it finds any. Entries in the file but not in the database are listed as a note: they were deleted from the database, or the database was restored from an older backup. Lines written before this version are counted but cannot be checked. Writers take a lock, so two server processes never break the chain.
+
+This makes a change **visible, not impossible**: someone with access to the server who rewrites both the file and the database, recomputing every hash, is not detected. For that, copy the file regularly to a computer or log service the server cannot write to.
 
 Not logged: record views.
 

@@ -49,9 +49,10 @@ export const authAPI = {
     const res = await send('/auth/me/', { quiet401: true })
     return res.ok ? res.json() : null
   },
-  // Like restore, but only a 401 means signed out; any other failure throws, so a hiccup does not sign anyone out
-  refresh: async () => {
-    const res = await send('/auth/me/', { quiet401: true })
+  // Like restore, but only a 401 means signed out; any other failure throws, so a hiccup does not sign anyone out.
+  // A `background` refresh (no typing or clicking since the last one) does not count as use of the session.
+  refresh: async ({ background = false } = {}) => {
+    const res = await send(background ? '/auth/me/?background=1' : '/auth/me/', { quiet401: true })
     if (res.status === 401) return null
     if (!res.ok) throw { status: res.status }
     return res.json()

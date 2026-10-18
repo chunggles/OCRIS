@@ -1,11 +1,57 @@
 # OCRIS v3: Changelog
 
+## 2026-10-18 (security: idle sign-out, sign out everywhere, audit file check)
+
+Three of the security gaps in [docs/WEAKNESSES_2026-10-11.md](docs/WEAKNESSES_2026-10-11.md). Two-step sign-in and encrypting the data inside MongoDB were left out for now, by decision.
+
+**To apply it:** run `python manage.py migrate` once (adds `last_active` to the sign-in sessions; until then every signed-in request fails). Nobody is signed out by it.
+
+- **Sign-out after 30 minutes without use** (`IDLE_TIMEOUT_MINUTES`, default 30; `0` turns it off), on top of the 12-hour limit. Each session records its last use (`ocris_login_sessions.last_active`, written at most once a minute). Typing, clicking, scrolling or touching in the app counts, not only requests, so someone typing a long form stays signed in: the app's check of the signed-in user tells the server whether there was any use since the last one, and a check without use (`/auth/me/?background=1`) does not extend the session. The check runs every 3 minutes, or a third of the idle limit when that is shorter. Once the limit has passed in the browser the app asks at once, and the login screen says "You were signed out after 30 minutes without use". `/auth/me/` and the login response carry `idle_timeout_minutes`.
+- **Sign out of every device** on the Profile page (asks first), using the existing `POST /auth/logout-all/`. The other devices return to the login screen at their next check, with "Your session has ended".
+- **Changes to the audit file show.** `backend/logs/audit.jsonl` is now a hash chain (new `services/audit_chain.py`): each line holds the hash of the one before it (`prev`) and its own (`hash`), and the same hash is stored with the entry in MongoDB (`audit_log.hash`, left out of `/audit/`). New command `python manage.py verify_audit` reports a changed line, a line removed, added or moved, and entries the database holds but the file lost (cut off or replaced), and exits with 1; entries only in the file are listed as a note. `maintenance` runs it and prints a WARNING when it fails. Writers take a file lock, so several server processes keep one chain, and a line cut off by a crash does not swallow the next one. Lines from before this version are counted but not checked. Someone who rewrites both the file and the database is still not detected; copy the file off the server for that. The file is no longer written through Python logging.
+- **The tests never write to the audit file**, even when `AUDIT_LOG_FILE` is set in `.env`; before, they would have added their entries to the real trail.
+- **Tests:** 5 new and 1 rewritten (108 in all, all passing). `vite build` succeeds. Checked in the browser on a separate copy with a 2-minute limit: a window left alone was signed out at 2 minutes 3 seconds with the message, a window where keys were pressed every 15 seconds without saving stayed signed in for 3 1/2 minutes, and Sign out of every device signed out its own window and, at once, another one. `verify_audit` passed on the file the copy wrote and caught a line edited by hand.
+- **Docs updated:** SECURITY.md (sessions, audit file), INSTALLATION.md (setting, commands, upgrade step), API.md (`/auth/me/`), DATABASE.md (`last_active`, `audit_log.hash`), USER_MANUAL.md (signing in and out), ARCHITECTURE.md, WEAKNESSES_2026-10-11.md (three items ticked).
+
+## 2026-10-18 (terms and quarters)
+
+Items 1, 2, 3 and 5 of [docs/TODO_TERMS_VS_QUARTERS.md](docs/TODO_TERMS_VS_QUARTERS.md). The Fill Out form had moved to three terms on 2026-10-14 while scans and older records have four quarters, and the rest of the app still assumed quarters.
+
+- **`grading_period` on every record:** `quarter` or `term`. Scans are saved as `quarter` (both layouts the OCR reads have four quarter columns); the Fill Out form sends the one it shows. A record saved before this has none and counts as `quarter`, which is right for every record in the database checked today. The server refuses another value, and a Q4 grade on a record kept in terms (`400`). Terms are still stored under `Q1` to `Q3` with `Q4` `N/A`, so no data changes.
+- **Fill Out Form 137:** a new form has three terms, as before. A record kept in quarters opens in quarters (Quarterly Rating 1 to 4) and keeps its Q4 when saved, where it used to lose it and have its finals recalculated from three terms. A **Three terms / Four quarters** choice at the top lets an older form be typed in quarters; switching to terms removes the typed Q4 grades after asking. Printing a typed record uses the same layout.
+- **Record Detail:** the grades table, edit mode and "Also on this form" show Term 1 to 3 or Q1 to Q4, never both, and say which. The missing-grade count no longer counts the empty Q4 of every term record.
+- **Grade Analytics:** quarters and terms are never averaged together. The trend chart and the subjects table show the means of one kind: the one chosen with the new **Grading periods** choice, which appears when the records shown include both, or the kind most of them use. Final ratings, pass rates and flags still count every record, as a final rating is the year's rating either way. `GET /analytics/` takes `period` and returns `grading_period` and `period_counts`.
+- **`tidy_records`** also marks forms typed in with three terms between 2026-10-14 and now (found by their certification boxes, which only that form saves), for any database where some were typed. The real database checked today has none.
+- **Tests:** 3 new and 2 extended (103 in all, all passing). `vite build` succeeds. Checked in the browser on a separate copy: typing a term form and a quarter form, the switch's warning, reopening and saving an old quarter record (Q4 kept), Record Detail and its edit mode for both kinds, the print view, and Grade Analytics with both kinds and with one; no errors.
+- **Docs updated:** API.md (record create and edit, analytics), DATABASE.md (`grading_period`), USER_MANUAL.md (typing a form, Record Detail, Grade Analytics), INSTALLATION.md (`tidy_records`), TODO_TERMS_VS_QUARTERS.md (done).
+- **Not done:** the OCR still reads only four quarter columns, so a printed three-term sheet scanned back in would have its Final Rating read as Q4 (it is flagged for review, not saved silently). The teacher role and printing on paper were not checked.
+
+## 2026-10-18 (archived forms: labels, and they stay without grades)
+
+Found by clicking the archive-only upload through in a browser (Chrome, OIC account, a PNG and a PDF archived in one batch). The upload itself, download and print of the archived scan, and search all worked.
+
+- **Bug fixed: editing an archived record made it "Incomplete".** Record Detail sends the grade sheet with every edit, an empty one for an archived form, and the server recalculated the remarks from it. Now an archived record keeps no grades: an empty sheet is ignored, grades are refused (`400`), and `details.archive_only` is kept when `details` is sent. `recompute_remarks` skips archived records for the same reason.
+- **"Archived" instead of "Pending".** Records, Record Detail, Search and the Dashboard showed a grey **Pending** remark for archived forms, as if they were waiting to be checked. They now show **Archived**.
+- **Scan History.** Archived scans showed **0%** OCR confidence and 0 flags, which read like a failed scan. Scans now store `archive_only`, and the page shows **Not scanned**, no flags, and the outcome **archived**. `tidy_records` marks the scans of forms archived before this change; run it once on the real database (`--dry-run` to preview).
+- **Record Detail** says the form was archived without scanning, in place of an empty grade table, and **Edit record** offers only the pupil's details.
+- **Upload step bar.** With **Archive only** ticked it shows **1. Upload, 2. Archive** instead of the six scanning steps.
+- **Audit Log.** An archived upload says "Archived without scanning".
+- **Tests.** 2 new and 1 extended (100 in all, all passing): edits of an archived record, and both repair commands with archived records. `vite build` succeeds. Checked again in the browser: Upload, Records, Record Detail (view, edit and save a name), Dashboard, Search, Scan History, Audit Log and Grade Analytics, with no errors.
+- **Docs updated:** API.md (record edit), DATABASE.md (`scans.archive_only`), USER_MANUAL.md (remarks, correcting a record, Scan History), INSTALLATION.md (`tidy_records`, `recompute_remarks`).
+- **Not checked:** the teacher role, phone width, and printing an archived PDF (only an archived image was printed, to the screen).
+
+## 2026-10-18 (archived forms left out of analytics)
+
+- **Bug fixed.** An archive-only record has no general average, but it was counted among the records of its grade level, so every archived form lowered that grade's pass rate (one passing record and three archived ones showed 25% instead of 100%). It was also counted in "Records analysed". `db.get_analytics` now leaves records with `details.archive_only` out of every figure. They are still listed on the Records page and in search.
+- **Tests.** 2 new (98 in all, all passing): archived records are left out of analytics, and the archive-only upload stores the file, the scan and an empty record without running OCR, refuses a blank name and leaves nothing under Unfinished uploads. This covers the backend of the 2026-10-14 archive option; the screens were clicked through later the same day (entry above).
+- **Docs updated:** API.md (`/analytics/`), USER_MANUAL.md (Grade Analytics, Archive only).
+
 ## 2026-10-14 (Upload Form 137: archive only)
 
 - **Archive only option.** Step 1 of the upload has an **Archive only** checkbox. Forms uploaded this way are stored without OCR or grade reading. The pupil's last and first name are required (nothing is read from the scan). The quality, OCR, extraction, validation and confirm steps are skipped: a new `StepArchive` shows the preview and an **Archive form** button, and the success screen says "Not scanned — archived only".
 - **Backend.** `POST /ocr/upload/` accepts `archive_only`. It stores the file, creates the scan and a record with empty grades, `general_average` `null`, empty remarks and `details.archive_only`, marks the scan saved, and logs `UPLOAD` with `archive_only`.
 - **Docs updated:** USER_MANUAL.md (Step 1), API.md (`/ocr/upload/`), DATABASE.md (`details`, `UPLOAD` audit entry).
-- **Not tested:** no automated test covers this path and it was not clicked through in a browser. How archived records look on the Records, Record Detail and Analytics pages (empty average and remarks) was not checked.
+- **Not tested:** no automated test covered this path (added 2026-10-18) and it was not clicked through in a browser. How archived records look on the Records, Record Detail and Analytics pages (empty average and remarks) was not checked.
 
 ## 2026-10-14 (Fill Out Form 137: two-page SF10-ES)
 

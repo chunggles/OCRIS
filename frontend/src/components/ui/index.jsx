@@ -122,7 +122,8 @@ const REMARKS_BADGES = { Promoted: 'b-green', Retained: 'b-amber', Incomplete: '
 // A record with grades still missing can't be decided; it is shown the way the school words it
 const REMARKS_LABELS = { Incomplete: 'Incomplete / For Verification' }
 
-export function RemarksBadge({ remarks }) {
+export function RemarksBadge({ remarks, archived = false }) {
+  if (archived) return <Badge type="b-grey">Archived</Badge>
   if (!remarks) return <Badge type="b-grey">Pending</Badge>
   return <Badge type={REMARKS_BADGES[remarks] || 'b-grey'}>{REMARKS_LABELS[remarks] || remarks}</Badge>
 }

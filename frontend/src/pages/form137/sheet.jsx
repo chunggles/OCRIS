@@ -4,19 +4,21 @@
 // out and edit records (FillFormPage) and, read-only, to print a typed-in record (PrintFormBtn).
 //
 // Learning areas are not pre-printed; each is typed in by hand. Ratings are given per term (three
-// a year), saved under the keys Q1-Q3 so records and the API keep one shape.
+// a year), as on the SF10-ES (Revised 2025), or per quarter (four) for a record kept in quarters,
+// such as an older form typed in; `sheet.grading_period` says which. Both are saved under the
+// keys Q1-Q4 (Q4 blank for terms) so records and the API keep one shape.
 //
 // The printed sheet is also meant to be scanned back in, so the layout keeps what the OCR
 // relies on (backend/api/ocr/table.py): two ruled grade tables side by side with a clear strip
 // between them, the wording of the labels, and one grade per ruled cell.
 import sealUrl from '../../assets/deped-seal.png'
 import logoUrl from '../../assets/deped-logo.png'
-import { GRADE_LEVELS, SCHOOL_YEARS } from '../../data/constants'
+import { GRADE_LEVELS, GRADING_PERIODS, SCHOOL_YEARS } from '../../data/constants'
 import { sectionsOf } from '../../utils/api'
-import { isNA, PASSING_GRADE } from '../../utils/format'
+import { gradingPeriodOf, isNA, PASSING_GRADE } from '../../utils/format'
 
-const TERMS = ['Q1', 'Q2', 'Q3']
-const GRADE_KEYS = [...TERMS, 'final']
+const ALL_KEYS = ['Q1', 'Q2', 'Q3', 'Q4', 'final']   // every grade a row can hold, whichever the grading period
+const periodsOf = (sheet) => GRADING_PERIODS[sheet.grading_period].keys   // its terms or quarters
 const FRONT_BLOCKS = 4  // year blocks on the front; the back holds as many more
 const BLOCK_COUNT = FRONT_BLOCKS * 2
 const AREA_ROWS = 15  // rows of each grade table above "General Average"
@@ -34,7 +36,7 @@ const BLANK_CERTIFICATION = {
   learner_name: '', lrn: '', grade: '', school_name: '', school_id: '', division: '', last_school_year: '', date: '', signatory: '',
 }
 
-const areaRow = (subject, id) => ({ id, subject, Q1: '', Q2: '', Q3: '', final: '' })
+const areaRow = (subject, id) => ({ id, subject, Q1: '', Q2: '', Q3: '', Q4: '', final: '' })
 
 function blankBlock() {
   return {
@@ -47,7 +49,8 @@ function blankBlock() {
   }
 }
 
-export const blankSheet = () => ({
+export const blankSheet = (gradingPeriod = 'term') => ({
+  grading_period: gradingPeriod,
   learner: BLANK_LEARNER,
   eligibility: BLANK_ELIGIBILITY,
   blocks: Array.from({ length: BLOCK_COUNT }, blankBlock),
@@ -67,21 +70,21 @@ const getIn = (object, path) => path.reduce((value, key) => value?.[key], object
 const isBlank = (v) => String(v ?? '').trim() === ''
 const isBadGrade = (v) => !isBlank(v) && !(Number(v) >= 0 && Number(v) <= 100)
 
-// The final rating is the rounded mean of the three terms, unless one is typed in
-const computedFinal = (row) => (TERMS.every(t => !isBlank(row[t]) && !isBadGrade(row[t]))
-  ? String(Math.round(TERMS.reduce((sum, t) => sum + Number(row[t]), 0) / TERMS.length))
+// The final rating is the rounded mean of the terms or quarters (`periods`), unless one is typed in
+const computedFinal = (row, periods) => (periods.every(t => !isBlank(row[t]) && !isBadGrade(row[t]))
+  ? String(Math.round(periods.reduce((sum, t) => sum + Number(row[t]), 0) / periods.length))
   : '')
-const finalOf = (row) => String(row.final).trim() || computedFinal(row)
-const remarkOf = (row) => {
-  const final = finalOf(row)
+const finalOf = (row, periods) => String(row.final).trim() || computedFinal(row, periods)
+const remarkOf = (row, periods) => {
+  const final = finalOf(row, periods)
   if (!final || isBadGrade(final)) return ''
   return Number(final) >= PASSING_GRADE ? 'PASSED' : 'FAILED'
 }
-const hasGrades = (row) => GRADE_KEYS.some(key => !isBlank(row[key]))
+const hasGrades = (row) => ALL_KEYS.some(key => !isBlank(row[key]))
 const blockHasGrades = (block) => block.rows.some(hasGrades)
 
-function generalAverage(block) {
-  const finals = block.rows.filter(r => !isBlank(r.subject)).map(finalOf).filter(f => f && !isBadGrade(f)).map(Number)
+function generalAverage(block, periods) {
+  const finals = block.rows.filter(r => !isBlank(r.subject)).map(r => finalOf(r, periods)).filter(f => f && !isBadGrade(f)).map(Number)
   return finals.length ? (finals.reduce((a, b) => a + b, 0) / finals.length).toFixed(1) : ''
 }
 
@@ -90,18 +93,28 @@ function generalAverage(block) {
 const subjectName = (text) => text.replace(/^\*/, '').replace(/\s*\(.*\)\s*$/, '').trim()
 
 // (grades for the API, problem message) for one block. Rows with neither a subject nor grades are left out.
-function gradesOf(block, blockNo) {
+function gradesOf(block, blockNo, periods) {
   const grades = {}
   for (const [i, row] of block.rows.entries()) {
     const subject = subjectName(row.subject)
     if (!hasGrades(row)) continue
     if (!subject) return [null, `Block ${blockNo}: type the learning area for row ${i + 1}.`]
     if (grades[subject]) return [null, `Block ${blockNo}: ${subject} is listed twice.`]
-    if (GRADE_KEYS.some(key => isBadGrade(row[key]))) return [null, `Block ${blockNo}, ${subject}: grades must be numbers from 0 to 100.`]
-    grades[subject] = { ...Object.fromEntries(TERMS.map(t => [t, String(row[t]).trim()])), final: finalOf(row) }
+    if ([...periods, 'final'].some(key => isBadGrade(row[key]))) return [null, `Block ${blockNo}, ${subject}: grades must be numbers from 0 to 100.`]
+    grades[subject] = { ...Object.fromEntries(periods.map(t => [t, String(row[t] ?? '').trim()])), final: finalOf(row, periods) }
   }
   return [grades, null]
 }
+
+// Whether any Q4 grade is typed on the sheet, which switching to terms would remove
+export const hasQ4Grades = (sheet) => sheet.blocks.some(block => block.rows.some(row => !isBlank(row.Q4)))
+
+// The sheet kept in `period` ('term' or 'quarter'); terms have no Q4, so it is cleared
+export const withGradingPeriod = (sheet, period) => ({
+  ...sheet,
+  grading_period: period,
+  blocks: period === 'term' ? sheet.blocks.map(block => ({ ...block, rows: block.rows.map(row => ({ ...row, Q4: '' })) })) : sheet.blocks,
+})
 
 // ── Saving and restoring ─────────────────────────────────────────────────────
 
@@ -113,12 +126,13 @@ export function recordOf(sheet) {
   if (isBlank(learner.last_name) || isBlank(learner.first_name)) return [null, "Please enter the learner's last name and first name."]
   const filled = sheet.blocks.map((block, i) => [block, i + 1]).filter(([block]) => blockHasGrades(block))
   if (filled.length === 0) return [null, 'Enter the grades for at least one learning area.']
+  const periods = periodsOf(sheet)
   let latest = null
   for (const [block, blockNo] of filled) {
     if (!block.grade_level || !block.section || !block.school_year) {
       return [null, `Block ${blockNo} has grades: choose its grade, section and school year.`]
     }
-    const [grades, problem] = gradesOf(block, blockNo)
+    const [grades, problem] = gradesOf(block, blockNo, periods)
     if (problem) return [null, problem]
     latest = { block, grades }
   }
@@ -130,6 +144,7 @@ export function recordOf(sheet) {
     school_year:   latest.block.school_year,
     class_adviser: latest.block.adviser.trim(),
     grades:        latest.grades,
+    grading_period: sheet.grading_period,
     details: {
       name_ext: learner.name_ext.trim(), middle_name: learner.middle_name.trim(),
       birthdate: learner.birthdate.trim(), sex: learner.sex.trim(),
@@ -161,7 +176,7 @@ function blocksFromGrades(record) {
     if (i !== index) return block
     const subjects = Object.entries(record.grades || {}).slice(0, AREA_ROWS)
     const rows = [...subjects, ...Array(AREA_ROWS - subjects.length).fill(['', {}])].map(([subject, g], id) => ({
-      ...areaRow(subject, id), ...Object.fromEntries(GRADE_KEYS.map(key => [key, isNA(g[key]) ? '' : String(g[key])])),
+      ...areaRow(subject, id), ...Object.fromEntries(ALL_KEYS.map(key => [key, isNA(g[key]) ? '' : String(g[key])])),
     }))
     return {
       ...block, rows,
@@ -176,6 +191,7 @@ export function sheetOf(record) {
   const details = record.details || {}
   const [last = '', ...given] = (record.pupil_name || '').split(',')
   return {
+    grading_period: gradingPeriodOf(record),
     learner: {
       ...BLANK_LEARNER,
       last_name: last.trim(), first_name: given.join(',').trim(), lrn: record.lrn || '',
@@ -194,7 +210,10 @@ export function sheetOf(record) {
 
 // ── The sheet ────────────────────────────────────────────────────────────────
 
-const GRADE_COLUMN_WIDTHS = ['46%', '8%', '8%', '8%', '11.5%', '18.5%']
+const GRADE_COLUMN_WIDTHS = {
+  term:    ['46%', '8%', '8%', '8%', '11.5%', '18.5%'],
+  quarter: ['40%', '7%', '7%', '7%', '7%', '11.5%', '20.5%'],
+}
 const REMEDIAL_COLUMN_WIDTHS = ['28.7%', '19.3%', '18.9%', '17.3%', '15.8%']
 const REMEDIAL_COLUMNS = [['area', 'Learning Areas'], ['final', 'Final Rating'], ['mark', 'Remedial Class Mark'], ['recomputed', 'Recomputed Final Grade'], ['remarks', 'Remarks']]
 const gradeNumber = (gradeLevel) => gradeLevel.replace(/\D/g, '')
@@ -207,6 +226,8 @@ function Columns({ widths }) {
 // of it; `tree` is the section tree, for the section choices. With `readOnly` nothing can be
 // typed, which is how a saved record is shown for printing.
 export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
+  const periods = periodsOf(sheet)
+  const quarterly = sheet.grading_period === 'quarter'
   // An underlined blank bound to one value of the sheet
   const blank = (path, { flex, width, center, ...rest } = {}) => (
     <input className={`sf-in${center ? ' center' : ''}`} style={{ flex, width }} value={getIn(sheet, path) ?? ''}
@@ -262,36 +283,36 @@ export function Sheet({ sheet, update = () => {}, tree, readOnly = false }) {
         </div>
 
         <table className="sf-table">
-          <Columns widths={GRADE_COLUMN_WIDTHS}/>
+          <Columns widths={GRADE_COLUMN_WIDTHS[sheet.grading_period]}/>
           <thead>
             <tr>
               <th rowSpan="2">{i % 2 ? 'Learning Areas' : 'LEARNING AREAS'}</th>
-              <th colSpan="3">Term Rating</th>
+              <th colSpan={periods.length}>{quarterly ? 'Quarterly Rating' : 'Term Rating'}</th>
               <th rowSpan="2">Final Rating</th>
               <th rowSpan="2">Remarks</th>
             </tr>
-            <tr>{TERMS.map((t, n) => <th key={t}>{n + 1}</th>)}</tr>
+            <tr>{periods.map((t, n) => <th key={t}>{n + 1}</th>)}</tr>
           </thead>
           <tbody>
             {b.rows.map((row, r) => (
               <tr key={row.id}>
                 <td>{cell([...path, 'rows', r, 'subject'], { left: true, 'aria-label': 'Learning area' })}</td>
-                {GRADE_KEYS.map((key, n) => (
+                {[...periods, 'final'].map((key, n) => (
                   <td key={key}>
                     {cell([...path, 'rows', r, key], {
                       bad: isBadGrade(row[key]), inputMode: 'decimal', maxLength: 5,
-                      placeholder: key === 'final' ? computedFinal(row) : undefined,
-                      'aria-label': `${row.subject || 'Learning area'} ${key === 'final' ? 'final rating' : `term ${n + 1}`}`,
+                      placeholder: key === 'final' ? computedFinal(row, periods) : undefined,
+                      'aria-label': `${row.subject || 'Learning area'} ${key === 'final' ? 'final rating' : `${quarterly ? 'quarter' : 'term'} ${n + 1}`}`,
                     })}
                   </td>
                 ))}
-                <td className="sf-auto">{remarkOf(row)}</td>
+                <td className="sf-auto">{remarkOf(row, periods)}</td>
               </tr>
             ))}
             <tr>
               <td className="sf-label">General Average</td>
-              <td/><td/><td/>
-              <td className="sf-auto">{generalAverage(b)}</td>
+              {periods.map(t => <td key={t}/>)}
+              <td className="sf-auto">{generalAverage(b, periods)}</td>
               <td/>
             </tr>
           </tbody>

@@ -2,6 +2,7 @@
 from django.core.management.base import BaseCommand
 
 from api import db
+from api.constants import is_archived
 from api.services import grading
 
 
@@ -15,6 +16,8 @@ class Command(BaseCommand):
         changed = 0
         records = db.all_records()
         for record in records:
+            if is_archived(record):   # never read, so there is nothing to decide
+                continue
             grades = record.get('grades') or {}
             average = grading.compute_general_average(grades)
             remarks = grading.remarks_for(average, grades)

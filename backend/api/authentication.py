@@ -12,10 +12,27 @@ SAFE_METHODS = ('GET', 'HEAD', 'OPTIONS')
 # What a user who still has a temporary password may do: see who they are, change it, or sign out
 ALLOWED_BEFORE_PASSWORD_CHANGE = ('me', 'change-password', 'logout', 'logout-all')
 PASSWORD_CHANGE_REQUIRED = 'password_change_required'
+# A request with ?background=1 was made by the app on its own (its refresh of the signed-in user),
+# so it does not count as use; the app sends it without the flag when the user typed or clicked since
+BACKGROUND_PARAM = 'background'
+ACTIVITY_RESOLUTION = timedelta(minutes=1)   # last_active is written at most this often (sooner for a short idle limit)
 
 
 def session_expired(session):
-    return timezone.now() - session.created > timedelta(hours=settings.TOKEN_TTL_HOURS)
+    """Past TOKEN_TTL_HOURS since sign-in, or unused for IDLE_TIMEOUT_MINUTES (0: no idle limit)."""
+    now = timezone.now()
+    if now - session.created > timedelta(hours=settings.TOKEN_TTL_HOURS):
+        return True
+    idle = settings.IDLE_TIMEOUT_MINUTES
+    return bool(idle) and now - session.last_active > timedelta(minutes=idle)
+
+
+def _mark_used(session, request):
+    now = timezone.now()
+    idle = settings.IDLE_TIMEOUT_MINUTES
+    resolution = min(ACTIVITY_RESOLUTION, timedelta(minutes=idle) / 4) if idle else ACTIVITY_RESOLUTION
+    if request._request.GET.get(BACKGROUND_PARAM) != '1' and now - session.last_active >= resolution:
+        LoginSession.objects.filter(pk=session.pk).update(last_active=now)
 
 
 def start_session(user, request):
@@ -32,8 +49,8 @@ def require_request_header(request):
 
 class CookieSessionAuthentication(BaseAuthentication):
     """
-    Authenticates the sign-in cookie. A cookie that is unknown or expired counts as no sign-in,
-    so the request gets 401 and the app returns to the login screen.
+    Authenticates the sign-in cookie. A cookie that is unknown or expired (too old, or unused for too
+    long) counts as no sign-in, so the request gets 401 and the app returns to the login screen.
     """
 
     def authenticate(self, request):
@@ -51,6 +68,7 @@ class CookieSessionAuthentication(BaseAuthentication):
             return None
         if request.method not in SAFE_METHODS:
             require_request_header(request)
+        _mark_used(session, request)
         if user.must_change_password:
             match = getattr(request._request, 'resolver_match', None)
             if not match or match.url_name not in ALLOWED_BEFORE_PASSWORD_CHANGE:

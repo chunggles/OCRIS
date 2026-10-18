@@ -6,7 +6,7 @@ import DownloadScanBtn from '../components/ui/DownloadScanBtn'
 import PrintFormBtn from './form137/PrintFormBtn'
 import { recordsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
-import { formatDate, isNA } from '../utils/format'
+import { formatDate, isArchived, isNA } from '../utils/format'
 import { useRecordOptions, withExtras } from '../utils/useRecordOptions'
 
 const PAGE_SIZE = 20
@@ -34,7 +34,7 @@ function RecordRow({ record: r, onDelete }) {
       <td style={{ fontWeight: hasAvg ? 700 : 400, color: hasAvg ? 'var(--text)' : 'var(--text-3)' }}>
         {hasAvg ? r.general_average : '—'}
       </td>
-      <td><RemarksBadge remarks={r.remarks}/></td>
+      <td><RemarksBadge remarks={r.remarks} archived={isArchived(r)}/></td>
       <td>
         <div className="btn-row">
           <Btn size="sm" onClick={() => nav('detail', { recordId: r.record_id })} disabled={!r.record_id}>View</Btn>

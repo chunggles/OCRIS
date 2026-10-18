@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { OCR_STEPS } from '../data/constants'
+import { ARCHIVE_STEPS, OCR_STEPS } from '../data/constants'
 import { PageHeader } from '../components/ui/index'
 import StepPupilInfo  from './upload/StepPupilInfo'
 import StepQuality    from './upload/StepQuality'
@@ -24,6 +24,7 @@ export default function UploadPage() {
   const [queue,    setQueue]    = useState([])  // forms still to save, as { file, form }; queue[0] is the current one
   const [stepData, setStepData] = useState({})  // what steps 2-6 have added for the current form
   const [saved,    setSaved]    = useState([])  // results of the forms saved so far
+  const [archiveTicked, setArchiveTicked] = useState(false)  // the Archive only box on step 1
   const data = { ...queue[0], ...stepData }
 
   const start    = (added) => { setQueue(added.queue); setStepData({}); setStep(2) }
@@ -51,9 +52,11 @@ export default function UploadPage() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [working])
 
-  const archiveOnly = Boolean(data.form?.archive_only)
+  // On step 1 the box decides it; once the forms are chosen, the queued form does
+  const archiveOnly = step === 1 ? archiveTicked : Boolean(data.form?.archive_only)
+  const stepLabels  = archiveOnly ? ARCHIVE_STEPS : OCR_STEPS
   const steps = {
-    1: <StepPupilInfo  initial={{ queue }} onNext={start}/>,
+    1: <StepPupilInfo  initial={{ queue }} onNext={start} onArchiveChange={setArchiveTicked}/>,
     2: archiveOnly
       ? <StepArchive data={data} onSuccess={succeed} onBack={leaveToStart}/>
       : <StepQuality   data={data} onNext={goNext} onBack={goBack}/>,
@@ -68,9 +71,9 @@ export default function UploadPage() {
   return (
     <div>
       <PageHeader title="Upload Form 137"/>
-      {!isSuccess && !(step > 1 && archiveOnly) && (
+      {!isSuccess && (
         <div className="step-tabs">
-          {OCR_STEPS.map((label, i) => {
+          {stepLabels.map((label, i) => {
             const n = i + 1
             const done = n < step
             return (

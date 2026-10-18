@@ -36,9 +36,9 @@ These cannot be settled without real scans.
 
 - [ ] No two-step sign-in.
 - [ ] MongoDB itself is not encrypted by OCRIS (names, grades and scanned text sit in it as plain data); use MongoDB or disk encryption.
-- [ ] The audit file (`backend/logs/audit.jsonl`) can be altered by someone with access to the server's disk.
-- [ ] No idle timeout: a session lasts 12 hours.
-- [ ] No "sign out of every device" button (the API `POST /auth/logout-all/` exists).
+- [x] The audit file (`backend/logs/audit.jsonl`) can be altered by someone with access to the server's disk. **2026-10-18:** a change now shows (hash chain, checked by `verify_audit` against the database); someone who rewrites both the file and the database is still not detected.
+- [x] No idle timeout: a session lasts 12 hours. **2026-10-18:** a session ends after 30 minutes without use (`IDLE_TIMEOUT_MINUTES`).
+- [x] No "sign out of every device" button (the API `POST /auth/logout-all/` exists). **2026-10-18:** on the Profile page.
 - [ ] After a refresh, the not-yet-uploaded forms of a batch and corrections typed on step 5 are lost; only the form being worked on can be resumed.
 - [ ] The search box cannot use a database index, and analytics reads every record it covers; fine for one school, not for a very large archive.
 - [ ] Backups run only when scheduled (`manage.py maintenance`); a full restore on a second machine has not been tried, and a backup on the same disk does not survive that disk.

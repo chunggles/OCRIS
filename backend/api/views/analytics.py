@@ -19,7 +19,7 @@ def analytics_dashboard(request):
         'section': query_param(request, 'section'),
         **scope,
     }
-    data = db.get_analytics(filters)
+    data = db.get_analytics(filters, query_param(request, 'period'))   # 'quarter' or 'term'; empty picks one
     # A subject is flagged for intervention when its class mean is failing. Subjects where some
     # pupils fail but the mean passes are listed, with their counts, under "subjects".
     flags = [

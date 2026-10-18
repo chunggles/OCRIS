@@ -8,6 +8,7 @@ import { formatDateTime } from '../utils/format'
 // One-line summary of an entry's details object
 const describe = (d = {}) => [
   d.pupil && `Pupil: ${d.pupil}`,
+  d.archive_only && 'Archived without scanning',
   d.grade && `Grade: ${d.grade}`,
   d.section && `Section: ${d.section}`,
   d.was && `Was: ${d.was}`,

@@ -6,11 +6,11 @@ import { authAPI } from '../utils/api'
 const OFFLINE = "Can't reach the server. Check that OCRIS is running."
 
 export default function LoginPage() {
-  const { login } = useApp()
+  const { login, signOutNotice } = useApp()
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error,    setError]    = useState('')
-  const [notice,   setNotice]   = useState('')
+  const [notice,   setNotice]   = useState(signOutNotice)   // e.g. signed out after a time without use
   const [loading,  setLoading]  = useState(false)
   // "Forgot password" swaps the password box for a request to the OIC
   const [forgot,   setForgot]   = useState(false)

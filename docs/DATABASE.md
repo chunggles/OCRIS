@@ -76,6 +76,7 @@ One document per validated Form 137. Created by `POST /api/ocr/validate/`.
 | `grades` | object | Grade sheet, see below | |
 | `general_average` | string or null | Mean of numeric Final grades, one decimal place | `"86.4"` |
 | `remarks` | string | `Promoted`, `Retained` or `Incomplete` | `Promoted` |
+| `grading_period` | string | `quarter` (four quarters: every scan, and older forms typed in) or `term` (three terms, stored as `Q1` to `Q3` with `Q4` `N/A`). A record saved before 2026-10-18 has none and counts as `quarter` | `term` |
 | `status` | string | Always `validated` | `validated` |
 | `uploaded_by` | string | Username of the person who saved the record | `g.ramos` |
 | `scan_id` | string | The scan this record was made from; empty for a record typed in on the Fill Out Form 137 page | `SCAN-3F9A1C2B` |
@@ -84,7 +85,7 @@ One document per validated Form 137. Created by `POST /api/ocr/validate/`.
 | `created_at` | datetime | When the record was saved | |
 | `updated_at` | datetime | Last change | |
 
-**`grades`** maps each subject to its quarterly and final grades. Values are strings; a blank grade is `"N/A"`.
+**`grades`** maps each subject to its quarterly (or term) and final grades. Values are strings; a blank grade is `"N/A"`.
 
 ```json
 {
@@ -101,11 +102,11 @@ On a multi-year Form 137-A the subject key includes the year level (`English I`,
 |---|---|---|
 | `name_ext`, `middle_name`, `birthdate`, `sex` | string | The learner's other personal information |
 | `eligibility` | object | The eligibility section: `kinder_progress_report`, `eccd_checklist` (true or false), `school_name`, `school_id`, `school_address`, `pept_rating`, `exam_date`, `others`, `testing_center`, `remark` |
-| `blocks` | array of 8 | Each scholastic-record block as typed, four on the front and four on the back: `school`, `school_id`, `district`, `division`, `region`, `grade_level`, `section`, `school_year`, `adviser`, `rows` (learning area `subject` with the three term ratings `Q1` to `Q3` and `final`), and `remedial` (`from`, `to`, `rows`). A record saved before the back page was added has 4 blocks. Rows saved then may also hold a `Q4`. |
+| `blocks` | array of 8 | Each scholastic-record block as typed, four on the front and four on the back: `school`, `school_id`, `district`, `division`, `region`, `grade_level`, `section`, `school_year`, `adviser`, `rows` (learning area `subject` with the ratings `Q1` to `Q3`, or `Q1` to `Q4` for a record kept in quarters, and `final`), and `remedial` (`from`, `to`, `rows`). A record saved before the back page was added has 4 blocks. Rows saved then may also hold a `Q4`. |
 | `certifications` | array of 3 | The certification boxes on the back: `learner_name`, `lrn`, `grade`, `school_name`, `school_id`, `division`, `last_school_year`, `date`, `signatory` |
 | `total_pages` | string | The "of ___" in "Page 2 of ___" |
 
-The three term ratings of a typed form are stored as `Q1` to `Q3`; `Q4` is saved as `N/A`.
+The three term ratings of a typed form are stored as `Q1` to `Q3`; `Q4` is saved as `N/A`. A form typed in quarters (`grading_period` `quarter`) keeps `Q4`.
 
 The record's own `grade_level`, `section`, `school_year` and `grades` are those of the last block that has grades.
 
@@ -131,6 +132,7 @@ One document per successful OCR run. Created by `POST /api/ocr/upload/`.
 | `overall_conf` | number | Mean confidence of fields with a confidence above 0 | `88.4` |
 | `flags_count` | integer | Fields flagged for review | `14` |
 | `null_count` | integer | Blank fields | `3` |
+| `archive_only` | boolean | Stored with **Archive only**, without being read: no confidence or flags | `false` |
 | `corrections_count` | integer | Corrections submitted at validation; 0 until saved | `14` |
 | `outcome` | string | `pending` after upload, `saved` after validation, `record deleted` once its record was deleted (the scan and file are kept) | `saved` |
 | `record_deleted_by`, `record_deleted_at` | string, datetime | Who deleted the record and when; only when `outcome` is `record deleted` | |
@@ -158,6 +160,7 @@ One document per logged action. Never updated or deleted by the application. Eac
 | `user` | string | Username of the person who did it |
 | `details` | object | Depends on the action |
 | `timestamp` | datetime | When it happened |
+| `hash` | string | The entry's hash in the audit file's chain, so the file can be checked against the database (`manage.py verify_audit`); missing for entries from before 2026-10-18, and in the tests. Not returned by `/audit/` |
 
 | Action | Written when | `details` |
 |---|---|---|
@@ -244,6 +247,7 @@ Model: `LoginSession`. One row per sign-in on one device (replaces the old one-t
 | `key` | varchar(64), primary key | Random value kept in the `ocris_session` HttpOnly cookie |
 | `user_id` | integer | The owner; a user can have several rows |
 | `created` | datetime | The session stops working `TOKEN_TTL_HOURS` (12) hours after this |
+| `last_active` | datetime | Last use (written at most once a minute); the session stops working `IDLE_TIMEOUT_MINUTES` (30) after this |
 | `user_agent` | varchar(200) | The browser that signed in |
 
 A row is deleted on sign-out (that device only), by "sign out everywhere", when the user changes their password (their other devices), when the OIC sets a new password, when it expires, and when the account is deleted.

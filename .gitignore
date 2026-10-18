@@ -23,4 +23,5 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+.claude/settings.local.json
 backend/logs/

@@ -1,22 +1,23 @@
 import { useCallback, useState } from 'react'
 import { useApp } from '../context/AppContext'
-import { isStaffRole } from '../data/constants'
+import { GRADING_PERIODS, isStaffRole } from '../data/constants'
 import { Card, Btn, InfoRow, StatusBanner, EmptyState, PageHeader, RemarksBadge, Notice } from '../components/ui/index'
 import DownloadScanBtn from '../components/ui/DownloadScanBtn'
 import PrintFormBtn from './form137/PrintFormBtn'
 import { recordsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
-import { formatDateTime, isNA, plural, NA, PASSING_GRADE, FOR_VERIFICATION } from '../utils/format'
+import { formatDateTime, gradingPeriodOf, isArchived, isNA, plural, NA, PASSING_GRADE, FOR_VERIFICATION } from '../utils/format'
 
-const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
-const GRADE_KEYS = [...QUARTERS, 'final']
+// The grade columns of a record kept in `period`: its quarters or terms, then the final rating
+const gradeKeysOf = (period) => [...GRADING_PERIODS[period].keys, 'final']
 // Pupil details an OIC or Admin can correct: [record field, label]
 const EDITABLE_INFO = [
   ['pupil_name', 'Pupil name'], ['lrn', 'LRN'], ['grade_level', 'Grade level'],
   ['section', 'Section'], ['school_year', 'School year'],
 ]
 
-function GradesTable({ grades }) {
+function GradesTable({ grades, period }) {
+  const { keys, columns } = GRADING_PERIODS[period]
   const subjects = Object.keys(grades)
   if (subjects.length === 0) return <EmptyState>No grades stored for this record.</EmptyState>
   return (
@@ -25,7 +26,7 @@ function GradesTable({ grades }) {
         <thead>
           <tr>
             <th>Subject</th>
-            {QUARTERS.map(q => <th key={q} className="center">{q}</th>)}
+            {columns.map(label => <th key={label} className="center">{label}</th>)}
             <th className="center">Final</th>
           </tr>
         </thead>
@@ -36,7 +37,7 @@ function GradesTable({ grades }) {
             return (
               <tr key={subject}>
                 <td className="col-name">{subject}</td>
-                {QUARTERS.map(q => (
+                {keys.map(q => (
                   <td key={q} className="center" style={{ color: isNA(g[q]) ? 'var(--text-3)' : 'var(--text)' }}>
                     {isNA(g[q]) ? NA : g[q]}
                   </td>
@@ -53,15 +54,16 @@ function GradesTable({ grades }) {
   )
 }
 
-// Edit mode: `rows` are [{ subject, Q1..Q4, final }]; the learning area's name can be changed too
-function EditGradesTable({ rows, onChange }) {
+// Edit mode: `rows` are [{ subject, its quarters or terms, final }]; the learning area's name can be changed too
+function EditGradesTable({ rows, period, onChange }) {
+  const { columns } = GRADING_PERIODS[period]
   return (
     <div style={{ overflowX: 'auto' }}>
       <table>
         <thead>
           <tr>
             <th>Subject</th>
-            {QUARTERS.map(q => <th key={q} className="center">{q}</th>)}
+            {columns.map(label => <th key={label} className="center">{label}</th>)}
             <th className="center">Final</th>
           </tr>
         </thead>
@@ -71,7 +73,7 @@ function EditGradesTable({ rows, onChange }) {
               <td className="col-name">
                 <input className="fld" value={row.subject} onChange={e => onChange(i, 'subject', e.target.value)} aria-label="Learning area"/>
               </td>
-              {GRADE_KEYS.map(key => (
+              {gradeKeysOf(period).map(key => (
                 <td key={key} className="center">
                   <input className="fld" style={{ width: 64, textAlign: 'center' }} value={isNA(row[key]) ? '' : row[key]}
                     placeholder={NA} onChange={e => onChange(i, key, e.target.value)} aria-label={`${row.subject || 'Learning area'} ${key}`}/>
@@ -102,7 +104,7 @@ function OtherYearsCard({ record }) {
   const years = Array.isArray(record.details?.other_years) ? record.details.other_years : []
   return years.map(({ label, grades }) => (
     <Card key={label} title={`Also on this form: ${label}`} meta="not counted in this record's average">
-      <GradesTable grades={grades || {}}/>
+      <GradesTable grades={grades || {}} period={gradingPeriodOf(record)}/>
     </Card>
   ))
 }
@@ -184,19 +186,23 @@ export default function RecordDetailPage() {
   }
 
   const editing = draft !== null
+  // An archived form was never scanned and keeps no grades; only the pupil's details can be corrected
+  const archived = isArchived(r)
+  const period = gradingPeriodOf(r)
+  const gradeKeys = gradeKeysOf(period)
   const grades = r.grades || {}
   const subjectCount = editing ? draft.rows.length : Object.keys(grades).length
   // a subject with nothing at all filled in was not taken; a subject with some grades but not others has gaps
   const missingCount = Object.values(grades).reduce((count, g) => {
-    const blanks = GRADE_KEYS.filter(key => isNA(g?.[key])).length
-    return count + (blanks < GRADE_KEYS.length ? blanks : 0)
+    const blanks = gradeKeys.filter(key => isNA(g?.[key])).length
+    return count + (blanks < gradeKeys.length ? blanks : 0)
   }, 0)
 
   const startEdit = () => {
     setSaveError('')
     setDraft({
       ...Object.fromEntries(EDITABLE_INFO.map(([field]) => [field, r[field] || ''])),
-      rows: Object.entries(r.grades || {}).map(([subject, g]) => ({ subject, ...Object.fromEntries(GRADE_KEYS.map(key => [key, g?.[key] ?? ''])) })),
+      rows: Object.entries(r.grades || {}).map(([subject, g]) => ({ subject, ...Object.fromEntries(gradeKeys.map(key => [key, g?.[key] ?? ''])) })),
     })
   }
   const setInfo  = (field, value) => setDraft(d => ({ ...d, [field]: value }))
@@ -209,7 +215,7 @@ export default function RecordDetailPage() {
     setSaving(true); setSaveError('')
     try {
       const { rows, ...info } = draft
-      await recordsAPI.update(recordId, { ...info, grades: newGrades })
+      await recordsAPI.update(recordId, archived ? info : { ...info, grades: newGrades })
       setDraft(null)
       refetch()
     } catch (e) {
@@ -235,7 +241,9 @@ export default function RecordDetailPage() {
       <Notice type="error">{saveError}</Notice>
       {editing && (
         <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
-          Leave a grade empty if it is blank on the form. A learning area's name can be corrected too. Grades must be numbers from 0 to 100. The general average and remarks are recalculated when you save.
+          {archived
+            ? "Only the pupil's details can be corrected. An archived form keeps no grades."
+            : "Leave a grade empty if it is blank on the form. A learning area's name can be corrected too. Grades must be numbers from 0 to 100. The general average and remarks are recalculated when you save."}
         </div>
       )}
 
@@ -260,7 +268,7 @@ export default function RecordDetailPage() {
         </Card>
         <Card title="Summary">
           <InfoRow label="General average"><strong>{isNA(r.general_average) ? '—' : r.general_average}</strong></InfoRow>
-          <InfoRow label="Remarks"><RemarksBadge remarks={r.remarks}/></InfoRow>
+          <InfoRow label="Remarks"><RemarksBadge remarks={r.remarks} archived={archived}/></InfoRow>
           <InfoRow label="Uploaded by">{r.uploaded_by || '—'}</InfoRow>
           <InfoRow label="Created">{formatDateTime(r.created_at)}</InfoRow>
           <InfoRow label="Last updated">{formatDateTime(r.updated_at)}</InfoRow>
@@ -268,15 +276,24 @@ export default function RecordDetailPage() {
         </Card>
       </div>
 
-      <Card title="Grades" meta={plural(subjectCount, 'subject')}>
-        {!editing && missingCount > 0 && (
-          <Notice type="error">
-            {plural(missingCount, 'grade')} on this record {missingCount === 1 ? 'is' : 'are'} missing: <strong>{FOR_VERIFICATION}</strong>.
-            Check {missingCount === 1 ? 'it' : 'them'} against the paper form. No value is estimated.
-          </Notice>
-        )}
-        {editing ? <EditGradesTable rows={draft.rows} onChange={setRowValue}/> : <GradesTable grades={grades}/>}
-      </Card>
+      {archived ? (
+        <Card title="Grades" meta="archived only">
+          <EmptyState icon="🗄️">
+            This form was archived without scanning, so no grades are kept for it.
+            Use <strong>Download original form</strong> or <strong>Print scanned form</strong> to read it.
+          </EmptyState>
+        </Card>
+      ) : (
+        <Card title="Grades" meta={`${plural(subjectCount, 'subject')} — ${GRADING_PERIODS[period].plural}`}>
+          {!editing && missingCount > 0 && (
+            <Notice type="error">
+              {plural(missingCount, 'grade')} on this record {missingCount === 1 ? 'is' : 'are'} missing: <strong>{FOR_VERIFICATION}</strong>.
+              Check {missingCount === 1 ? 'it' : 'them'} against the paper form. No value is estimated.
+            </Notice>
+          )}
+          {editing ? <EditGradesTable rows={draft.rows} period={period} onChange={setRowValue}/> : <GradesTable grades={grades} period={period}/>}
+        </Card>
+      )}
 
       <OtherYearsCard record={r}/>
       <FormDetailsCard record={r}/>

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SCHOOL_YEARS, CURRENT_SCHOOL_YEAR } from '../../data/constants'
 import { Card, Btn, FormGroup, Notice } from '../../components/ui/index'
 import { useClassPicker, NO_CLASS } from '../../utils/useClassPicker'
@@ -89,7 +89,8 @@ function FormRow({ row, number, onChange, onRemove }) {
 
 // Step 1: pick the class once, then one or more scanned forms, each with its pupil's name.
 // `initial.queue` restores what was entered when the user comes back to this step.
-export default function StepPupilInfo({ initial = {}, onNext }) {
+// `onArchiveChange` is told whether Archive only is ticked, so the page can show its shorter steps.
+export default function StepPupilInfo({ initial = {}, onNext, onArchiveChange }) {
   const restored = initial.queue || []
   const [cls,   setCls]   = useState(() => {
     const form = restored[0]?.form
@@ -99,6 +100,7 @@ export default function StepPupilInfo({ initial = {}, onNext }) {
     newRow(file, { last_name: form.last_name, first_name: form.first_name, lrn: form.lrn })))
   const [archiveOnly, setArchiveOnly] = useState(() => Boolean(restored[0]?.form.archive_only))
   const [error, setError] = useState('')
+  useEffect(() => { onArchiveChange?.(archiveOnly) }, [archiveOnly, onArchiveChange])
 
   const picker = useClassPicker(cls.grade, cls.section)
   const { grade, section, sectionNames } = picker

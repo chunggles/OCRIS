@@ -49,10 +49,15 @@ def login_view(request):
     session = start_session(user, request)
     update_last_login(None, user)  # shown as "Last login" in User Management
     db.log_action('LOGIN', user.username, {'role': user.role, 'ip': ip})
-    response = Response({'user': UserSerializer(user).data})
+    response = Response({'user': _own_account(user)})
     response.set_cookie(settings.AUTH_COOKIE_NAME, session.key, max_age=int(settings.TOKEN_TTL_HOURS * 3600),
                         httponly=True, **_cookie_args())
     return response
+
+
+def _own_account(user):
+    """The signed-in user, with the minutes a session may go unused (the app signs out after them)."""
+    return {**UserSerializer(user).data, 'idle_timeout_minutes': settings.IDLE_TIMEOUT_MINUTES}
 
 
 def _signed_out(message):
@@ -83,7 +88,7 @@ def logout_all_view(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def me_view(request):
-    return Response(UserSerializer(request.user).data)
+    return Response(_own_account(request.user))
 
 
 @api_view(['POST'])
@@ -104,7 +109,7 @@ def change_password_view(request):
     request.user.save(update_fields=['password', 'must_change_password'])
     LoginSession.objects.filter(user=request.user).exclude(pk=getattr(request.auth, 'pk', None)).delete()
     db.log_action('CHANGE_PASSWORD', request.user.username)
-    return Response({'detail': 'Password changed.', 'user': UserSerializer(request.user).data})
+    return Response({'detail': 'Password changed.', 'user': _own_account(request.user)})
 
 
 @api_view(['POST'])

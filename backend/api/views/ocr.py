@@ -7,7 +7,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .. import db
-from ..constants import PUPIL_KEYS, is_na
+from ..constants import PUPIL_KEYS, QUARTER, is_na
 from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality, read_scan
 from ..serializers import ValidationSubmitSerializer
 from ..services import crypto, grading, identity, maintenance, storage, uploads
@@ -99,6 +99,7 @@ def _archive_only(request, file, pupil):
         'original_name': file.name,
         'file_size_bytes': file.size,
         'uploaded_by': request.user.username,
+        'archive_only': True,
     })
     record_id = db.create_record({
         **pupil,
@@ -165,6 +166,7 @@ def ocr_validate(request):
         'grades': grades,
         'general_average': general_average,
         'remarks': remarks,
+        'grading_period': QUARTER,   # the layouts the OCR reads have four quarter columns
         'uploaded_by': request.user.username,
         'scan_id': scan_id,
         'corrections': corrections,

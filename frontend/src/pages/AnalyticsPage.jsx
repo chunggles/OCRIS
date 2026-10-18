@@ -1,17 +1,16 @@
 import { useState, useCallback, useMemo } from 'react'
-import { GRADE_LEVELS } from '../data/constants'
+import { GRADE_LEVELS, GRADING_PERIODS } from '../data/constants'
 import { Card, StatCard, Badge, Btn, FormGroup, StatusBanner, EmptyState, PageHeader } from '../components/ui/index'
 import ChartCanvas, { CHART_COLORS, barEndLabels, lineEndLabel, legendGap } from '../components/ui/Chart'
 import { analyticsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
-import { PASSING_GRADE } from '../utils/format'
+import { PASSING_GRADE, plural } from '../utils/format'
 import { useRecordOptions, withExtras } from '../utils/useRecordOptions'
 
-const QUARTERS = ['Q1', 'Q2', 'Q3', 'Q4']
-const QUARTER_LABELS = ['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4']
 const ALL_SUBJECTS = ''   // the trend chart's default: the mean over every subject
 const BAR_ROW_HEIGHT = 30
 const show = (n) => (n === null || n === undefined ? '—' : n)
+const NO_FILTERS = { school_year: '', grade: '', section: '' }
 
 // A horizontal bar chart of one value per category, 0 to 100, with each value written at its bar's end
 function Bars({ rows, format, label }) {
@@ -37,27 +36,28 @@ function Bars({ rows, format, label }) {
   return <ChartCanvas type="bar" data={data} options={options} plugins={plugins} height={rows.length * BAR_ROW_HEIGHT + 36} label={label}/>
 }
 
-// Mean grade per quarter. One line is the subject of the chart; the others stay grey behind it.
-function TrendChart({ subjects, periodMeans, highlight }) {
-  const withQuarters = useMemo(() => subjects.filter(s => QUARTERS.filter(q => s.means[q] !== null).length >= 2), [subjects])
-  const chosen = withQuarters.find(s => s.subject === highlight)
+// Mean grade per quarter or term (`period`). One line is the subject of the chart; the others stay grey behind it.
+function TrendChart({ subjects, periodMeans, highlight, period }) {
+  const { keys, names } = GRADING_PERIODS[period]
+  const withPeriods = useMemo(() => subjects.filter(s => keys.filter(q => s.means[q] != null).length >= 2), [subjects, keys])
+  const chosen = withPeriods.find(s => s.subject === highlight)
   const data = useMemo(() => {
-    const context = withQuarters.filter(s => s !== chosen).map(s => ({
-      label: s.subject, data: QUARTERS.map(q => s.means[q]),
+    const context = withPeriods.filter(s => s !== chosen).map(s => ({
+      label: s.subject, data: keys.map(q => s.means[q]),
       borderColor: CHART_COLORS.context, borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, pointHitRadius: 12, spanGaps: true,
     }))
     const main = {
       label: chosen ? chosen.subject : 'All subjects',
-      data: QUARTERS.map(q => (chosen ? chosen.means[q] : periodMeans?.[q] ?? null)),
+      data: keys.map(q => (chosen ? chosen.means[q] : periodMeans?.[q] ?? null)),
       borderColor: CHART_COLORS.accent, backgroundColor: CHART_COLORS.accent, borderWidth: 2,
       pointRadius: 4, pointHoverRadius: 6, pointBorderColor: CHART_COLORS.surface, pointBorderWidth: 2, pointHitRadius: 14, spanGaps: true,
     }
-    return { labels: QUARTER_LABELS, datasets: [...context, main] }   // drawn last, so it sits on top
-  }, [withQuarters, chosen, periodMeans])
+    return { labels: names, datasets: [...context, main] }   // drawn last, so it sits on top
+  }, [withPeriods, chosen, periodMeans, keys, names])
   const mainIndex = data.datasets.length - 1
   const options = useMemo(() => ({
     responsive: true, maintainAspectRatio: false, animation: false,
-    interaction: { mode: 'index', intersect: false },   // one tooltip lists every subject at that quarter
+    interaction: { mode: 'index', intersect: false },   // one tooltip lists every subject at that quarter or term
     layout: { padding: { right: 36 } },
     plugins: {
       legend: {
@@ -81,19 +81,20 @@ function TrendChart({ subjects, periodMeans, highlight }) {
   }), [mainIndex])
   const plugins = useMemo(() => [lineEndLabel(mainIndex), legendGap], [mainIndex])
   const hasPoints = data.datasets[mainIndex].data.some(v => v !== null)
-  if (!hasPoints) return <div className="text-muted" style={{ fontSize: 12, padding: '12px 0' }}>No quarterly grades for the selected filters.</div>
-  return <ChartCanvas type="line" data={data} options={options} plugins={plugins} height={280} label="Mean grade per quarter"/>
+  if (!hasPoints) return <div className="text-muted" style={{ fontSize: 12, padding: '12px 0' }}>No {GRADING_PERIODS[period].adjective} grades for the selected filters.</div>
+  return <ChartCanvas type="line" data={data} options={options} plugins={plugins} height={280} label={`Mean grade per ${period}`}/>
 }
 
 // The figures behind the charts, subject by subject; the most failing grades come first
-function SubjectTable({ subjects }) {
+function SubjectTable({ subjects, period }) {
+  const { keys, columns } = GRADING_PERIODS[period]
   return (
     <div style={{ overflowX: 'auto' }}>
       <table>
         <thead>
           <tr>
             <th>Subject</th>
-            {QUARTERS.map((q, i) => <th key={q} className="center">Q{i + 1}</th>)}
+            {columns.map(label => <th key={label} className="center">{label}</th>)}
             <th className="center">Final</th><th className="center">Pass rate</th><th className="center">Failing final ratings</th>
           </tr>
         </thead>
@@ -101,7 +102,7 @@ function SubjectTable({ subjects }) {
           {subjects.map(s => (
             <tr key={s.subject}>
               <td className="col-name">{s.subject}</td>
-              {QUARTERS.map(q => <td key={q} className="center">{show(s.means[q])}</td>)}
+              {keys.map(q => <td key={q} className="center">{show(s.means[q])}</td>)}
               <td className="center" style={{ fontWeight: 700, color: 'var(--text)' }}>{show(s.means.final)}</td>
               <td className="center">{s.pass_rate === null ? '—' : `${s.pass_rate}%`}</td>
               <td className="center">
@@ -137,13 +138,15 @@ const asMean = (n) => `${n}`
 const asPercent = (n) => `${n}%`
 
 export default function AnalyticsPage() {
-  const [filters, setFilters] = useState({ school_year: '', grade: '', section: '' })
+  const [filters, setFilters] = useState(NO_FILTERS)
+  // Whose quarters or terms the period figures show; empty lets the server pick the kind most records use
+  const [periodChoice, setPeriodChoice] = useState('')
   const [highlight, setHighlight] = useState(ALL_SUBJECTS)
   const options = useRecordOptions()
 
   const fetchAnalytics = useCallback(
-    () => analyticsAPI.dashboard(Object.fromEntries(Object.entries(filters).filter(([, v]) => v))),
-    [filters],
+    () => analyticsAPI.dashboard(Object.fromEntries(Object.entries({ ...filters, period: periodChoice }).filter(([, v]) => v))),
+    [filters, periodChoice],
   )
   const { data, loading, error, refetch } = useFetch(fetchAnalytics)
   const setFilter = (key, value) => setFilters(f => ({ ...f, [key]: value }))
@@ -161,6 +164,11 @@ export default function AnalyticsPage() {
   const gradeRows = useMemo(() => Object.entries(data?.pass_rates || {})
     .map(([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name)), [data])
   const scope = [filters.school_year, filters.grade, filters.section].filter(Boolean).join(' — ') || 'All records'
+  // Quarters and terms are never averaged together; when both kinds of record match, a switch picks one
+  const period = data?.grading_period === 'term' ? 'term' : 'quarter'
+  const counts = data?.period_counts || {}
+  const mixed = counts.quarter > 0 && counts.term > 0
+  const periodNote = mixed ? ` — from the ${plural(counts[period], 'record')} kept in ${GRADING_PERIODS[period].plural}` : ''
 
   return (
     <div>
@@ -186,7 +194,15 @@ export default function AnalyticsPage() {
               {options.sections.map(s => <option key={s}>{s}</option>)}
             </select>
           </FormGroup>
-          <div className="form-group"><Btn size="sm" onClick={() => setFilters({ school_year: '', grade: '', section: '' })}>Clear</Btn></div>
+          {mixed && (
+            <FormGroup label="Grading periods">
+              <select className="fld fld-auto" value={period} onChange={e => setPeriodChoice(e.target.value)} aria-label="Grading periods">
+                <option value="quarter">Quarters ({plural(counts.quarter, 'record')})</option>
+                <option value="term">Terms ({plural(counts.term, 'record')})</option>
+              </select>
+            </FormGroup>
+          )}
+          <div className="form-group"><Btn size="sm" onClick={() => { setFilters(NO_FILTERS); setPeriodChoice('') }}>Clear</Btn></div>
         </div>
       </Card>
 
@@ -209,14 +225,14 @@ export default function AnalyticsPage() {
             <Card title="Class mean by subject" meta={`Final rating — ${scope}`}>
               <Bars rows={meanRows} format={asMean} label="Class mean final rating by subject"/>
             </Card>
-            <Card title="Trend across grading periods" meta="Mean grade per quarter"
+            <Card title="Trend across grading periods" meta={`Mean grade per ${period}${periodNote}`}
               action={
                 <select className="fld fld-auto" value={highlight} onChange={e => setHighlight(e.target.value)} aria-label="Subject to highlight">
                   <option value={ALL_SUBJECTS}>All subjects</option>
                   {subjects.map(s => <option key={s.subject}>{s.subject}</option>)}
                 </select>
               }>
-              <TrendChart subjects={subjects} periodMeans={data?.period_means} highlight={highlight}/>
+              <TrendChart subjects={subjects} periodMeans={data?.period_means} highlight={highlight} period={period}/>
             </Card>
             <Card title="Pass rate by subject" meta={`Share of final ratings at ${PASSING_GRADE} or higher — lowest first`}>
               <Bars rows={passRows} format={asPercent} label="Pass rate by subject"/>
@@ -226,8 +242,9 @@ export default function AnalyticsPage() {
             </Card>
           </div>
 
-          <Card title="Subjects by grading period" meta="Class means, with the most failing final ratings first">
-            <SubjectTable subjects={subjects}/>
+          <Card title="Subjects by grading period"
+            meta={mixed ? `Means per ${period}${periodNote}; final ratings from every record` : 'Class means, with the most failing final ratings first'}>
+            <SubjectTable subjects={subjects} period={period}/>
           </Card>
           <InterventionFlags flags={flags}/>
         </>

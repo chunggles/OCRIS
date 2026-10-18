@@ -113,6 +113,8 @@ AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'None' if REQUIRE_HTTPS
 REQUEST_HEADER = 'X-OCRIS-Request'
 # Hours a login stays valid
 TOKEN_TTL_HOURS = float(os.getenv('TOKEN_TTL_HOURS', '12'))
+# Minutes a login may go unused (no typing, clicking or request) before it ends; 0 turns it off
+IDLE_TIMEOUT_MINUTES = float(os.getenv('IDLE_TIMEOUT_MINUTES', '30'))
 # After this many wrong passwords for one username (or LOGIN_MAX_ATTEMPTS_PER_IP from one address)
 # within LOGIN_LOCKOUT_MINUTES, sign-in is refused until the oldest of them ages out
 LOGIN_MAX_ATTEMPTS = int(os.getenv('LOGIN_MAX_ATTEMPTS', '5'))
@@ -155,10 +157,11 @@ PENDING_SCAN_DAYS = int(os.getenv('PENDING_SCAN_DAYS', '7'))
 BACKUP_KEEP = int(os.getenv('BACKUP_KEEP', '14'))
 
 # ── Audit trail ──────────────────────────────────────────────────────────────
-# Every audit entry is also appended to this file (one JSON object per line), so the trail
-# survives if the database is wiped or replaced. Keep it on storage that is not wiped on deploy.
-# (Tests write nowhere.)
-AUDIT_LOG_FILE = Path(os.getenv('AUDIT_LOG_FILE', os.devnull if 'test' in sys.argv else str(BASE_DIR / 'logs' / 'audit.jsonl')))
+# Every audit entry is also appended to this file (one JSON object per line, each holding the hash
+# of the one before it; see api/services/audit_chain.py), so the trail survives if the database is
+# wiped or replaced. Keep it on storage that is not wiped on deploy. The tests never write to it,
+# even when .env names a file, so their entries cannot join the school's trail.
+AUDIT_LOG_FILE = Path(os.devnull if 'test' in sys.argv else os.getenv('AUDIT_LOG_FILE', str(BASE_DIR / 'logs' / 'audit.jsonl')))
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
 # A grade read from a scan is auto-approved only above this confidence (%); anything else is
@@ -174,15 +177,7 @@ TIME_ZONE = 'Asia/Manila'
 USE_I18N = True
 USE_TZ = True
 
-# ── Logging ──────────────────────────────────────────────────────────────────
+# ── Audit file ───────────────────────────────────────────────────────────────
+# Written by api/services/audit_chain.py, one hash-chained JSON line per entry
 if AUDIT_LOG_FILE != Path(os.devnull):
     AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {'raw': {'format': '%(message)s'}},
-    'handlers': {'audit_file': {
-        'class': 'logging.FileHandler', 'filename': str(AUDIT_LOG_FILE), 'encoding': 'utf-8', 'formatter': 'raw', 'delay': True,
-    }},
-    'loggers': {'ocris.audit': {'handlers': ['audit_file'], 'level': 'INFO', 'propagate': False}},
-}

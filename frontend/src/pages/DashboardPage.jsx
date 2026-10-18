@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 import { Card, StatCard, Alert, Btn, StatusBanner, EmptyState, PageHeader, RemarksBadge } from '../components/ui/index'
 import { recordsAPI, analyticsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
-import { formatDate, formatLongDate, plural } from '../utils/format'
+import { formatDate, formatLongDate, isArchived, plural } from '../utils/format'
 
 const RECENT_LIMIT = 6
 
@@ -27,7 +27,7 @@ function RecentUploads({ records, loading, onRefresh }) {
               <td className="col-name">{r.pupil_name || '—'}</td>
               <td>{r.grade_level || '—'}</td>
               <td>{formatDate(r.created_at, { month: 'short', day: 'numeric' })}</td>
-              <td><RemarksBadge remarks={r.remarks}/></td>
+              <td><RemarksBadge remarks={r.remarks} archived={isArchived(r)}/></td>
               <td><Btn size="sm" onClick={() => nav('detail', { recordId: r.record_id })}>View</Btn></td>
             </tr>
           ))}

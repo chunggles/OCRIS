@@ -5,7 +5,7 @@ import { ocrAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { formatDateTime } from '../utils/format'
 
-const OUTCOME_BADGES = { saved: 'b-green', rejected: 'b-rose', 'record deleted': 'b-grey' }
+const OUTCOME_BADGES = { saved: 'b-green', archived: 'b-green', rejected: 'b-rose', 'record deleted': 'b-grey' }
 
 const confidenceColor = (conf) => {
   if (conf === undefined || conf === null) return 'text-3'
@@ -13,7 +13,9 @@ const confidenceColor = (conf) => {
 }
 
 function ScanRow({ scan: r }) {
-  const outcome = r.outcome || 'pending'
+  // An archived form was stored without being read, so it has no confidence or flags
+  const archived = Boolean(r.archive_only)
+  const outcome = archived && r.outcome === 'saved' ? 'archived' : r.outcome || 'pending'
   const flags   = r.flags_count ?? 0
   return (
     <tr>
@@ -22,10 +24,19 @@ function ScanRow({ scan: r }) {
       <td>{r.grade_level || '—'}</td>
       <td>{r.uploaded_by || '—'}</td>
       <td style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{formatDateTime(r.created_at)}</td>
-      <td style={{ color: `var(--${confidenceColor(r.overall_conf)})`, fontWeight: 700 }}>
-        {r.overall_conf !== undefined ? `${r.overall_conf}%` : '—'}
-      </td>
-      <td><Badge type={flags > 0 ? 'b-amber' : 'b-green'}>{flags}</Badge></td>
+      {archived ? (
+        <>
+          <td style={{ color: 'var(--text-3)' }}>Not scanned</td>
+          <td style={{ color: 'var(--text-3)' }}>—</td>
+        </>
+      ) : (
+        <>
+          <td style={{ color: `var(--${confidenceColor(r.overall_conf)})`, fontWeight: 700 }}>
+            {r.overall_conf !== undefined ? `${r.overall_conf}%` : '—'}
+          </td>
+          <td><Badge type={flags > 0 ? 'b-amber' : 'b-green'}>{flags}</Badge></td>
+        </>
+      )}
       <td><Badge type={OUTCOME_BADGES[outcome] || 'b-amber'}>{outcome}</Badge></td>
       <td>{r.filename ? <DownloadScanBtn scanId={r.scan_id}/> : '—'}</td>
     </tr>

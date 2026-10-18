@@ -40,6 +40,15 @@ export const PAGE_TITLES = {
 }
 
 export const OCR_STEPS    = ['Upload', 'Quality', 'Processing', 'Extraction', 'Validation', 'Confirm']
+export const ARCHIVE_STEPS = ['Upload', 'Archive']   // Archive only skips reading the form
+
+// How a record's school year is divided: four quarters (older forms, and every scan) or three terms
+// (the SF10-ES, Revised 2025). Terms are stored under Q1 to Q3 with Q4 left blank, so every record
+// keeps one shape. `columns` head a grade table, `names` label a chart.
+export const GRADING_PERIODS = {
+  quarter: { keys: ['Q1', 'Q2', 'Q3', 'Q4'], columns: ['Q1', 'Q2', 'Q3', 'Q4'], names: ['Quarter 1', 'Quarter 2', 'Quarter 3', 'Quarter 4'], plural: 'quarters', adjective: 'quarterly' },
+  term:    { keys: ['Q1', 'Q2', 'Q3'], columns: ['Term 1', 'Term 2', 'Term 3'], names: ['Term 1', 'Term 2', 'Term 3'], plural: 'terms', adjective: 'term' },
+}
 export const GRADE_LEVELS = ['Grade 1', 'Grade 2', 'Grade 3', 'Grade 4', 'Grade 5', 'Grade 6']
 
 // School years from the current one back to 1990, newest first. A school year starts in June.

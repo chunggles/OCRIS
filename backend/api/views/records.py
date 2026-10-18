@@ -3,7 +3,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .. import db
-from ..constants import NA
+from ..constants import NA, PERIOD_KEYS, QUARTER, TERM, grading_period_of, is_archived, is_na
 from ..permissions import IsOICOrAdmin
 from ..services import audit, grading, identity
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param, query_param
@@ -105,6 +105,10 @@ def _record_updates(data):
         updates['grades'] = grades
         updates['general_average'] = grading.compute_general_average(grades)
         updates['remarks'] = grading.remarks_for(updates['general_average'], grades)
+    if 'grading_period' in data:
+        if data['grading_period'] not in PERIOD_KEYS:
+            return None, 'grading_period must be "quarter" or "term".'
+        updates['grading_period'] = data['grading_period']
     if 'details' in data:
         updates['details'] = _clean_details(data['details'])
     if not updates:
@@ -143,6 +147,14 @@ def _clean_details(details):
     return {key: _bounded(details[key]) for key in DETAIL_FIELDS if key in details}
 
 
+def _q4_problem(grading_period, grades):
+    """A message if a record kept in terms has a Q4 grade (terms are Q1 to Q3), else None."""
+    if grading_period != TERM:
+        return None
+    subject = next((s for s, values in (grades or {}).items() if not is_na(values.get('Q4'))), None)
+    return f'{subject}: a record kept in terms has no Q4 grade.' if subject else None
+
+
 def _bad_grade(grades, saved=None):
     """
     The first grade that isn't a number from 0 to 100, as (subject, value), or None. With the
@@ -174,6 +186,10 @@ def record_create(request):
     bad = _bad_grade(record['grades'])
     if bad:
         return detail(f'{bad[0]}: "{bad[1]}" is not a grade from 0 to 100.', 400)
+    record.setdefault('grading_period', QUARTER)
+    problem = _q4_problem(record['grading_period'], record['grades'])
+    if problem:
+        return detail(problem, 400)
     refusal = outside_own_class(request.user, record)
     if refusal:
         return refusal
@@ -232,12 +248,26 @@ def record_update(request, record_id):
     updates, error = _record_updates(request.data)
     if error:
         return detail(error, 400)
+    if is_archived(record):
+        # Only the pupil's details of an archived form can change; an empty grade sheet sent along is ignored,
+        # so its average and remarks are not recalculated
+        if updates.get('grades'):
+            return detail('An archived form keeps no grades.', 400)
+        for field in ('grades', 'general_average', 'remarks', 'grading_period'):
+            updates.pop(field, None)
+        if 'details' in updates:
+            updates['details']['archive_only'] = True
+        if not updates:
+            return detail('Nothing to update.', 400)
     if 'grades' in updates:
         if _is_typed(record) and not updates['grades']:
             return detail('Enter at least one subject with its grades.', 400)
         bad = _bad_grade(updates['grades'], record.get('grades'))
         if bad:
             return detail(f'{bad[0]}: "{bad[1]}" is not a grade from 0 to 100.', 400)
+    problem = _q4_problem(updates.get('grading_period', grading_period_of(record)), updates.get('grades', record.get('grades')))
+    if problem:
+        return detail(problem, 400)
     problem = _identity_problem_of_edit(record, updates)
     if problem:
         return detail(*problem)

@@ -1,6 +1,9 @@
 # TODO: terms vs quarters (Record Detail, Analytics, OCR)
 
-Reminder written 2026-10-14. Not started.
+Reminder written 2026-10-14. **Done 2026-10-18** except item 4 (OCR), which was decided as below; see the CHANGELOG.
+
+- Items 1, 2, 3 and 5 are done. The known caveat is gone: a record kept in quarters opens on the Fill Out page in quarters, and the page can also type an older form in quarters.
+- Item 4: scanned forms stay in quarters. Both layouts the OCR reads have four quarter columns, and every scan saved so far is quarterly. **Still open:** a printed three-term sheet scanned back in would be read by position, so its Final Rating would land in Q4 and its Final would be flagged. Reading it needs a three-term layout in `table.py` (weakness 24).
 
 ## Background
 

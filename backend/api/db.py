@@ -9,10 +9,10 @@ from django.conf import settings
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.errors import ConnectionFailure, PyMongoError
 
-from .constants import GRADE_LEVELS, PASSING_GRADE, is_na
+from .constants import GRADE_LEVELS, PASSING_GRADE, PERIOD_KEYS, QUARTER, TERM, grading_period_of, is_na
+from .services import audit_chain
 
 logger = logging.getLogger(__name__)
-audit_logger = logging.getLogger('ocris.audit')
 
 PAGE_SIZE = 20
 DATE_FIELDS = ('created_at', 'updated_at', 'timestamp', 'synced_at', 'record_deleted_at')
@@ -165,6 +165,7 @@ def create_record(data):
         'grades':          data.get('grades', {}),
         'general_average': data.get('general_average'),
         'remarks':         data.get('remarks', ''),
+        'grading_period':  data.get('grading_period') or QUARTER,
         'status':          'validated',
         'uploaded_by':     data.get('uploaded_by', ''),
         'scan_id':         data.get('scan_id', ''),
@@ -304,6 +305,7 @@ def create_scan(data):
         'flags_count':       data.get('flags_count', 0),
         'corrections_count': 0,
         'null_count':        data.get('null_count', 0),
+        'archive_only':      bool(data.get('archive_only')),   # stored without being read
         'outcome':           'pending',
         'record_id':         None,
         'created_at':        datetime.utcnow(),
@@ -366,19 +368,30 @@ def delete_scan(scan_id):
 
 def log_action(action, user, details=None):
     """
-    Record an action. It is appended to the audit file first, so the entry survives even if
-    the database is unreachable, wiped or replaced; then it is stored for the Audit Log page.
+    Record an action. It is appended to the audit file first, as the next link of its hash chain
+    (services/audit_chain.py), so the entry survives even if the database is unreachable, wiped or
+    replaced; then it is stored, with the same hash, for the Audit Log page.
     """
     entry = {'action': action, 'user': user, 'details': details or {}, 'timestamp': datetime.utcnow()}
     try:
-        audit_logger.info(json.dumps({**entry, 'timestamp': entry['timestamp'].isoformat() + 'Z'}, default=str, ensure_ascii=False))
+        line = json.loads(json.dumps({**entry, 'timestamp': entry['timestamp'].isoformat() + 'Z'}, default=str))
+        entry['hash'] = audit_chain.append(settings.AUDIT_LOG_FILE, line)
     except Exception as e:  # a full disk must not stop the action being audited in the database
         logger.error(f'Audit file could not be written: {e}')
     audit_col().insert_one(entry)
 
 
 def list_audit(page=1, size=PAGE_SIZE):
-    return _paginate(audit_col(), {}, 'timestamp', page, size)
+    return _paginate(audit_col(), {}, 'timestamp', page, size, projection={'hash': 0})
+
+
+def audit_hashes():
+    """The audit-file hash of every stored entry, oldest first (entries from before the chain have none)."""
+    return [e['hash'] for e in audit_col().find({'hash': {'$type': 'string'}}, {'_id': 0, 'hash': 1}).sort('timestamp', ASCENDING)]
+
+
+def audit_entries_with_hashes(hashes):
+    return list(audit_col().find({'hash': {'$in': list(hashes)}}, {'_id': 0, 'action': 1, 'user': 1, 'timestamp': 1}).sort('timestamp', ASCENDING))
 
 
 # ── Users mirror (Django/SQLite is the source of truth) ──────────────────────
@@ -515,14 +528,11 @@ def _to_float(value):
         return None
 
 
-GRADING_PERIODS = ('Q1', 'Q2', 'Q3', 'Q4', 'final')
-
-
 def _mean(total, count):
     return round(total / count, 1) if count else None
 
 
-def get_analytics(filters=None):
+def get_analytics(filters=None, grading_period=None):
     """
     Descriptive figures for the records matching the filters:
       subject_means   {subject: mean final rating}
@@ -530,14 +540,28 @@ def get_analytics(filters=None):
       subjects        per subject: its mean for each grading period and the final rating, how
                       many final ratings there are, and how many of them pass and fail
       period_means    {grading period: mean over every subject}
-    Blank and unreadable grades are left out of every figure.
+      grading_period  whose periods the means are: 'quarter' (Q1-Q4) or 'term' (Q1-Q3)
+      period_counts   {'quarter': records, 'term': records}
+    Quarters and terms are never averaged together: the period means come only from records
+    of `grading_period`, or, when it is not given, of the kind most records use. A final rating
+    is the year's rating either way, so every record counts towards the final figures.
+    Blank and unreadable grades are left out of every figure, and archive-only records (stored
+    without reading any grades) are left out altogether: they would lower every pass rate.
     """
-    records = list(records_col().find(_query(filters), {'_id': 0}))
+    query = {**_query(filters), 'details.archive_only': {'$ne': True}}
+    records = list(records_col().find(query, {'_id': 0}))
+
+    period_counts = {QUARTER: 0, TERM: 0}
+    for record in records:
+        period_counts[grading_period_of(record)] += 1
+    if grading_period not in PERIOD_KEYS:
+        grading_period = TERM if period_counts[TERM] > period_counts[QUARTER] else QUARTER
+    keys = (*PERIOD_KEYS[grading_period], 'final')
 
     pass_counts, total_counts = {}, {}
     sums = {}      # subject -> {period: [total, count]}
     passed, failed = {}, {}
-    overall = {period: [0, 0] for period in GRADING_PERIODS}
+    overall = {period: [0, 0] for period in keys}
 
     for record in records:
         grade = record.get('grade_level', 'Unknown')
@@ -547,9 +571,11 @@ def get_analytics(filters=None):
         if average is not None and average >= PASSING_GRADE:
             pass_counts[grade] = pass_counts.get(grade, 0) + 1
 
+        # a record of the other kind adds only its final ratings
+        own = keys if grading_period_of(record) == grading_period else ('final',)
         for subject, grades in record.get('grades', {}).items():
-            periods = sums.setdefault(subject, {period: [0, 0] for period in GRADING_PERIODS})
-            for period in GRADING_PERIODS:
+            periods = sums.setdefault(subject, {period: [0, 0] for period in keys})
+            for period in own:
                 value = _to_float(grades.get(period))
                 if value is None:
                     continue
@@ -566,7 +592,7 @@ def get_analytics(filters=None):
         graded = periods['final'][1]
         subjects.append({
             'subject': subject,
-            'means': {period: _mean(*periods[period]) for period in GRADING_PERIODS},
+            'means': {period: _mean(*periods[period]) for period in keys},
             'graded': graded,
             'passed': passed.get(subject, 0),
             'failed': failed.get(subject, 0),
@@ -580,5 +606,7 @@ def get_analytics(filters=None):
         'subject_means': {s['subject']: s['means']['final'] for s in subjects if s['means']['final'] is not None},
         'pass_rates': {g: round(pass_counts.get(g, 0) / total_counts[g] * 100, 1) for g in total_counts},
         'subjects': subjects,
-        'period_means': {period: _mean(*overall[period]) for period in GRADING_PERIODS},
+        'period_means': {period: _mean(*overall[period]) for period in keys},
+        'grading_period': grading_period,
+        'period_counts': period_counts,
     }

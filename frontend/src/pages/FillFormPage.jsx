@@ -5,7 +5,7 @@ import { Btn, Notice, PageHeader, StatusBanner } from '../components/ui/index'
 import { recordsAPI, sectionsAPI } from '../utils/api'
 import { useFetch } from '../utils/useFetch'
 import { NO_CLASS } from '../utils/useClassPicker'
-import { Sheet, sheetOf, blankSheet, recordOf, setIn } from './form137/sheet'
+import { Sheet, sheetOf, blankSheet, recordOf, setIn, hasQ4Grades, withGradingPeriod } from './form137/sheet'
 
 const sameClass = (user, record) => record.grade_level === user.assigned_grade
   && record.section.toLowerCase() === (user.assigned_section || '').toLowerCase()
@@ -26,6 +26,12 @@ function Form137({ record, tree, onNew }) {
   const dirty = snapshot !== cleanSnapshot
 
   const update = (path, value) => setSheet(s => setIn(s, path, value))
+  // Three terms (SF10-ES, Revised 2025) or four quarters (an older form, or a record kept in quarters)
+  const quarterly = sheet.grading_period === 'quarter'
+  const changeGradingPeriod = (period) => {
+    if (period === 'term' && hasQ4Grades(sheet) && !window.confirm('Switch to three terms? The Q4 grades typed on this form will be removed.')) return
+    setSheet(s => withGradingPeriod(s, period))
+  }
 
   const handleNew = () => {
     if (dirty && !window.confirm(saved ? 'Leave this form? Changes since the last save will be lost.' : 'Clear everything typed on this form?')) return
@@ -65,6 +71,10 @@ function Form137({ record, tree, onNew }) {
           {saved && <Btn variant="primary" onClick={() => nav('detail', { recordId: saved.record_id })} disabled={dirty}>View record</Btn>}
           <Btn onClick={() => window.print()}>Print</Btn>
           <Btn onClick={handleNew}>{saved ? 'Fill out another form' : 'Clear form'}</Btn>
+          <select className="fld fld-auto" value={sheet.grading_period} onChange={e => changeGradingPeriod(e.target.value)} aria-label="Grading periods">
+            <option value="term">Three terms (SF10-ES, Revised 2025)</option>
+            <option value="quarter">Four quarters (older forms)</option>
+          </select>
         </div>
         <Notice type="error">{error}</Notice>
         <Notice type="success">
@@ -73,7 +83,7 @@ function Form137({ record, tree, onNew }) {
         <div className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
           {saved
             ? `Editing record ${saved.record_id}. Change anything on the form, then click Save changes.`
-            : 'Type on the form as you would write on paper. Leave a box empty if it is blank. The final rating fills itself in from the three terms unless you type one. The form has two pages (front and back); print both on long bond paper (8.5 × 13 in).'}
+            : `Type on the form as you would write on paper. Leave a box empty if it is blank. The final rating fills itself in from the ${quarterly ? 'four quarters' : 'three terms'} unless you type one. For an older form graded by quarter, choose Four quarters. The form has two pages (front and back); print both on long bond paper (8.5 × 13 in).`}
         </div>
       </div>
 

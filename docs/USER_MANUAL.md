@@ -36,6 +36,10 @@ To sign out, click **Sign out** at the top right. Always sign out on a shared co
 
 You stay signed in if you refresh the page. Refreshing in the middle of an upload does not lose a form that was already read: see **Unfinished uploads** under Step 1. After 12 hours you are asked to sign in again.
 
+**Signed out after 30 minutes without use.** If nobody types, clicks or scrolls in OCRIS for 30 minutes, it signs you out and the login screen says so. Typing a long form counts as use, but a form left half-typed for that long is lost, so save before you step away.
+
+**Signing out everywhere.** If you left OCRIS open on another computer, or think someone knows your password, open **Profile** and click **Sign out of every device**. Every computer and phone signed in as you returns to the login screen. Then change your password.
+
 ### Changing your password
 
 1. Click **Change password** at the top right.
@@ -127,7 +131,7 @@ Each form is one image, up to 20 MB. You can upload up to 30 forms of the same c
 3. For each form in the list, type the pupil's **Last name** and **First name**, and the **LRN** if you have it (optional). Click **Remove** to take a form off the list.
 4. Click **Next**.
 
-**Archive only.** Tick **Archive only** above the upload box to store the forms without scanning them for grades. The last and first name are then required for every form, because nothing is read from the scan. After **Next**, each form shows a preview and an **Archive form** button; the quality check, OCR, extraction and validation steps are skipped. The saved record has the scan attached but no grades, general average or remarks.
+**Archive only.** Tick **Archive only** above the upload box to store the forms without scanning them for grades. The last and first name are then required for every form, because nothing is read from the scan. After **Next**, each form shows a preview and an **Archive form** button; the quality check, OCR, extraction and validation steps are skipped. The saved record has the scan attached but no grades, general average or remarks, and it is not counted on the Grade Analytics page.
 
 Type these details carefully. **The saved record uses what you type here**, not what the system reads from the scan.
 
@@ -221,6 +225,7 @@ If you chose several forms, click **Next form** to continue with the next one. *
 | **Promoted** | The general average is 75 or higher and every Final grade is 75 or higher |
 | **Retained** | At least one Final grade is below 75 |
 | **Incomplete** | The result cannot be decided: there are no Final grades, or a Final grade was saved as something that is not a number |
+| **Archived** | The form was stored with **Archive only**, without scanning: it has no grades, so nothing is decided |
 
 The **general average** is the average of all Final grades on the form. Blank (N/A) grades are left out; they are never counted as zero.
 
@@ -232,11 +237,13 @@ Click **Fill Out Form 137** in the menu when there is no paper form to scan. The
 2. Fill in the **Eligibility for Elementary School Enrollment** section if you have it.
 3. In the **Scholastic Record**, use the block for the school year you are recording. The form has eight blocks, four on each page. No learning areas are printed: type each one in the rows of the block.
 4. For each block you put grades in, choose **Classified as Grade**, **Section** and **School Year**. The sections offered are the ones set up for that grade on the Sections page.
-5. Type the grades for each term (Term Rating 1, 2 and 3). Leave a box empty if there is no grade. The **Final Rating** fills itself in as the average of the three terms, rounded to a whole number; type over it if the form shows a different one. **General Average** and **Remarks** (PASSED or FAILED) are worked out for you.
+5. Type the grades for each term (Term Rating 1, 2 and 3). For an older form graded by quarter, first choose **Four quarters (older forms)** at the top of the page: the blocks then show Quarterly Rating 1 to 4. Leave a box empty if there is no grade. The **Final Rating** fills itself in as the average of the terms (or quarters), rounded to a whole number; type over it if the form shows a different one. **General Average** and **Remarks** (PASSED or FAILED) are worked out for you.
 6. On the back page, fill in a **Certification** box for a transfer out or an elementary school completer, if needed.
 7. Click **Save record**. Print both pages on long bond paper (8.5 × 13 in).
 
 A grade that is not a number from 0 to 100 turns red and must be corrected before saving.
+
+A record saved in quarters opens again in quarters. Switching a form from quarters to three terms removes the Q4 grades typed on it; the page asks first.
 
 **How the form is saved.** One form is saved as one record. The record is filed under the class of the **last block that has grades**, and its grades and general average are that block's. The other blocks are kept with the record, and come back when the form is opened or printed, but they are not counted in Records or Grade Analytics. Teachers can only save a form whose last block with grades is their own class.
 
@@ -266,7 +273,7 @@ Opened by clicking **View** on a record.
 |---|---|
 | Pupil information | Name, LRN, grade level, section, school year |
 | Summary | General average, remarks, who uploaded it, when it was created and last updated, scan ID |
-| Grades | Q1 to Q4 and Final for each subject. A Final below 75 is shown in red. |
+| Grades | Q1 to Q4 and Final for each subject, or Term 1 to 3 and Final for a form kept in terms. A Final below 75 is shown in red. |
 | Manual corrections | The values that were typed by hand during validation, if any |
 
 **Download original form** saves the scanned image. **Back to Records** returns to the list.
@@ -285,6 +292,8 @@ If the uploaded file is no longer on the server, a message says so and nothing i
 1. Click **Edit record**.
 2. Correct the pupil details or any grade. Leave a grade empty if it is blank on the form.
 3. Click **Save changes**. The general average and remarks are recalculated.
+
+An archived form (Remarks **Archived**) keeps no grades: only its pupil details can be corrected. To read it, use **Download original form** or **Print scanned form**.
 
 Click **Cancel** to leave the record as it was.
 
@@ -308,7 +317,7 @@ The **Found in** column says where each record matched. Up to 50 records are sho
 
 ## 9. Grade Analytics
 
-Charts and figures calculated from the saved records. Choose a **School year**, **Grade level** or **Section** at the top to narrow everything on the page. Blank and unreadable grades are left out of every figure.
+Charts and figures calculated from the saved records. Choose a **School year**, **Grade level** or **Section** at the top to narrow everything on the page. Blank and unreadable grades are left out of every figure, and forms stored with **Archive only** are left out of the page altogether (they have no grades).
 
 | Item | Meaning |
 |---|---|
@@ -317,13 +326,15 @@ Charts and figures calculated from the saved records. Choose a **School year**, 
 | Final ratings that pass | Share of final ratings that are 75 or higher |
 | Failing final ratings | Number of final ratings below 75 |
 | Class mean by subject | Bar chart of the average final rating per subject, highest first |
-| Trend across grading periods | Line chart of the average grade in each of the four quarters. The blue line is the average over all subjects; choose a subject at the top right to follow that subject, with the others in grey behind it. |
+| Trend across grading periods | Line chart of the average grade in each quarter (or term). The blue line is the average over all subjects; choose a subject at the top right to follow that subject, with the others in grey behind it. |
 | Pass rate by subject | Bar chart of the share of final ratings at 75 or higher, lowest first |
 | Pass rate by grade level | Share of records whose general average is 75 or higher |
-| Subjects by grading period | Table of every subject's average per quarter and final rating, its pass rate, and how many final ratings fail. The subjects with the most failing ratings are at the top. |
+| Subjects by grading period | Table of every subject's average per quarter (or term) and final rating, its pass rate, and how many final ratings fail. The subjects with the most failing ratings are at the top. |
 | Intervention flags | Each subject whose class mean is below 75, as a prompt for remedial action |
 
 Point at a bar or a line to see its exact value.
+
+Quarters and terms are never averaged together. When the records shown include both, a **Grading periods** choice appears at the top: it decides whether the trend chart and the table show quarters or terms, and from which records. The final ratings, pass rates and flags always count every record.
 
 ## 10. Scan History
 
@@ -332,9 +343,9 @@ Every scan that was uploaded and read, newest first.
 | Column | Meaning |
 |---|---|
 | Scan ID | The scan's reference number |
-| OCR confidence | How confident the system was overall. Green: 90% and above. Amber: 70 to 89%. Red: below 70%. |
+| OCR confidence | How confident the system was overall. Green: 90% and above. Amber: 70 to 89%. Red: below 70%. **Not scanned** for an archived form. |
 | Flags | How many values needed checking |
-| Outcome | **saved** if a record was made from it; **pending** if the upload was started but never saved |
+| Outcome | **saved** if a record was made from it; **archived** if it was stored with Archive only; **pending** if the upload was started but never saved |
 | File | Download the original scan |
 
 A **pending** scan usually means someone left the upload before the last step. Upload the form again to complete it.

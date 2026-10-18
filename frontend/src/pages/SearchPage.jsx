@@ -3,7 +3,7 @@ import { useApp } from '../context/AppContext'
 import { Card, Btn, StatusBanner, EmptyState, PageHeader, RemarksBadge, SearchInput } from '../components/ui/index'
 import { recordsAPI } from '../utils/api'
 import PrintFormBtn from './form137/PrintFormBtn'
-import { errorMessage, escapeRegExp, isNA } from '../utils/format'
+import { errorMessage, escapeRegExp, isArchived, isNA } from '../utils/format'
 import { GRADE_LEVELS } from '../data/constants'
 import { useRecordOptions, withExtras } from '../utils/useRecordOptions'
 
@@ -34,7 +34,7 @@ function ResultsTable({ results, term }) {
               <td>{r.section || '—'}</td>
               <td>{r.school_year || '—'}</td>
               <td style={{ fontWeight: hasAvg ? 700 : 400 }}>{hasAvg ? r.general_average : '—'}</td>
-              <td><RemarksBadge remarks={r.remarks}/></td>
+              <td><RemarksBadge remarks={r.remarks} archived={isArchived(r)}/></td>
               <td style={{ fontSize: 11 }}>{(r.matched_in || []).join(', ') || '—'}</td>
               <td>
                 <div className="btn-row">
