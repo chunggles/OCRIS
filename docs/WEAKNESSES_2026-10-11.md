@@ -69,4 +69,4 @@ These cannot be settled without real scans.
 
 - [x] **Several people uploading at once could run the server out of memory.** Two processes of four threads could read 8 forms at once, about 2.5 GB on a 2 GB instance; the restart would drop every upload in progress. **Fixed:** each process reads at most `OCR_MAX_CONCURRENT` (2) forms at once, 4 in all (about 1.2 GB); further uploads wait their turn.
 - [x] **A form being read during a deploy could be cut off.** gunicorn gave running requests 60 seconds to finish, while a form takes up to 70 and Render waits 90. **Fixed:** 85 seconds. A form still waiting for its turn is cut off and has to be uploaded again.
-- [ ] **The deployment work is not on GitHub.** The Render set-up of 2026-10-18 and these fixes are not committed or pushed, and Render builds from `main` on GitHub.
+- [x] **The deployment work is not on GitHub.** The Render set-up of 2026-10-18 and these fixes are not committed or pushed, and Render builds from `main` on GitHub. **Pushed** on 2026-10-25 (commit `15e72e0`).
