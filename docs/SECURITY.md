@@ -14,7 +14,7 @@ OCRIS stores pupils' personal information and academic records, which are person
 
 - After **5 wrong passwords for one username** within 15 minutes, sign-in for that username is refused with `429` and a wait time, even for the right password. After 20 failures from one address, that address is refused. The lock frees itself as the failures age out.
 - Usernames that do not exist are counted the same way, so the limit and the error message do not reveal which accounts exist.
-- Failures are stored in the `ocris_auth_attempts` table (not in memory), so the limit holds across restarts and several server processes. Behind a proxy or a cloud host's load balancer, set `TRUSTED_PROXY_COUNT` so the caller's real address is used and cannot be faked with the `X-Forwarded-For` header.
+- Failures are stored in the `ocris_auth_attempts` table (not in memory), so the limit holds across restarts and several server processes. Behind a proxy or a cloud host's load balancer, set `TRUSTED_PROXY_COUNT` so the caller's real address is used and cannot be faked with the `X-Forwarded-For` header. How many proxies a host puts in front differs (sources disagree about Render), so check it on the running server: `GET /api/server/client-address/`, for the OIC only, shows the address used, the header as received and, behind Cloudflare, the right number ([DEPLOYMENT.md](DEPLOYMENT.md), step 6.3).
 - `LOGIN_FAILED` and `LOGIN_LOCKED` are written to the audit log. The numbers are settings: `LOGIN_MAX_ATTEMPTS`, `LOGIN_MAX_ATTEMPTS_PER_IP`, `LOGIN_LOCKOUT_MINUTES`.
 
 ### Password rules
@@ -31,7 +31,7 @@ OCRIS stores pupils' personal information and academic records, which are person
 
 ### Sessions
 
-- A successful login creates a **session** (`ocris_login_sessions`) whose random key is sent in the **`ocris_session` cookie**: `HttpOnly` (scripts on the page cannot read it, so a malicious script cannot steal it), `Secure` whenever HTTPS is required, and `SameSite` set by `AUTH_COOKIE_SAMESITE` (`None` with HTTPS so a site and a server on different domains can talk, `Lax` for local development). The browser holds no token in `localStorage`.
+- A successful login creates a **session** (`ocris_login_sessions`) whose random key is sent in the **`ocris_session` cookie**: `HttpOnly` (scripts on the page cannot read it, so a malicious script cannot steal it), `Secure` whenever HTTPS is required, and `SameSite` set by `AUTH_COOKIE_SAMESITE`: `Lax` when the site and the API share one address, as in the cloud set-up (`FRONTEND_DIST`) and in local development, so other sites' pages cannot send it at all; `None` only for a site and a server on different domains (with HTTPS). The browser holds no token in `localStorage`.
 - The key is not returned in any response body, and it is not stored: the server keeps only its SHA-256, so someone with a copy of `db.sqlite3` or of a backup cannot use it to sign in.
 - Sessions that have ended are deleted when they are next used, and also whenever anyone signs in, so a session whose browser never came back does not stay in the database.
 - **One session per sign-in.** A user may be signed in on several devices. **Sign out** ends only that device; **Sign out of every device** on the Profile page (`POST /api/auth/logout-all/`) ends all of them, and the other devices return to the login screen at their next check. Changing your password ends the other devices; the OIC setting a user's password ends all of theirs.
@@ -45,7 +45,9 @@ Because the browser sends the cookie by itself, a hostile website could try to m
 1. Every request that changes data, and login itself, must carry the custom header `X-OCRIS-Request`. A page on another site cannot add a custom header to a request without a CORS pre-flight, and the server allows pre-flights only from `CORS_ALLOWED_ORIGINS`.
 2. The server answers `403` to such requests without the header.
 
-Django's own CSRF protection remains on for the admin site. Only the origins in `CORS_ALLOWED_ORIGINS` may call the API with credentials; list nothing else.
+Only the origins in `CORS_ALLOWED_ORIGINS` may call the API with credentials; list nothing else. With `DEBUG` off the list is empty unless set, which is right when the server also serves the site.
+
+Django's admin site (`/admin/`) is switched off unless `DEBUG` is on or `ENABLE_DJANGO_ADMIN=True`: changes made there are not written to the audit log, and its sign-in has none of the limits above. Its own CSRF protection stays on when it is enabled.
 
 ## 2. Roles
 
@@ -158,7 +160,9 @@ Deleting a record does **not** delete its scan. The original form is the evidenc
 - Secrets (`SECRET_KEY`, `DATA_ENCRYPTION_KEY`, `SEED_PASSWORD`, the MongoDB URI) are read from `backend/.env`, which is excluded from Git. `.env.example` contains only placeholders.
 - The seed script reads the default password from `SEED_PASSWORD` and does not print it.
 - The SQLite database, the uploaded scans, the backups and the audit file are also excluded from Git.
-- With `DEBUG` off, the server refuses to start without a real `SECRET_KEY` and a valid `DATA_ENCRYPTION_KEY`, and HTTPS is required (plain HTTP is redirected, cookies are HTTPS-only).
+- With `DEBUG` off, the server refuses to start without a real `SECRET_KEY` and a valid `DATA_ENCRYPTION_KEY`, and HTTPS is required (plain HTTP is redirected, cookies are HTTPS-only). Only the host's health check, `/api/health/`, answers over plain HTTP; it says nothing but `ok`.
+- The cloud image (`Dockerfile`) never contains `.env`, the databases, the scans or the backups (`.dockerignore`); on Render the secrets are entered in the dashboard. Pages of the built site are sent with `X-Frame-Options: DENY`, so another site cannot show OCRIS inside a frame.
+- The web server's access log records the path of each request without its query string, so the names typed into a search do not end up in the host's logs.
 
 ## 8. Data privacy notes
 
@@ -176,7 +180,7 @@ The data kept about each pupil is: name, LRN, grade level, section, school year,
 
 ## 9. Before real deployment
 
-The repository is configured for development. Before the system holds real pupil data on a shared server:
+The repository is configured for development. On Render, [DEPLOYMENT.md](DEPLOYMENT.md) covers the steps below. Before the system holds real pupil data on another shared server:
 
 1. Set `DEBUG=False`, a long random `SECRET_KEY` and a `DATA_ENCRYPTION_KEY`; store a copy of the key apart from the server.
 2. Serve everything over HTTPS; set `CORS_ALLOWED_ORIGINS` to the site's address only, `TRUSTED_PROXY_COUNT` to the number of proxies, and `AUTH_COOKIE_SAMESITE=None` if the site and the server are on different domains.

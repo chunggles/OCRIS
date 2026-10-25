@@ -56,10 +56,14 @@ On macOS or Linux, use `source venv/bin/activate` and `cp .env.example .env`.
 | `MONGO_URI` | No | `mongodb://localhost:27017` | MongoDB connection string |
 | `MONGO_DB_NAME` | No | `ocris_bcs` | MongoDB database name |
 | `ALLOWED_HOSTS` | No | `localhost,127.0.0.1` | Host names the backend answers to, separated by commas. Add the server's name or IP address when others connect to it. |
-| `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` | Addresses the frontend may be opened from, separated by commas |
+| `CORS_ALLOWED_ORIGINS` | No | `http://localhost:3000,http://127.0.0.1:3000` when `DEBUG` is `True`, else none | Other addresses the frontend may be opened from, separated by commas. None are needed when the server also serves the site (`FRONTEND_DIST`) |
 | `DATA_ENCRYPTION_KEY` | Yes when `DEBUG` is `False` | none | Key that encrypts uploaded scans and backups. Generate one with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Several keys separated by commas allow rotation: the first encrypts, all can decrypt. **Keep a copy outside the server: without the key, encrypted scans and backups cannot be read.** |
 | `PENDING_SCAN_DAYS` | No | `7` | Days an upload that was read but not saved is kept before the server deletes it (`0` keeps them) |
-| `BACKUP_KEEP` | No | `14` | Backup files `manage.py maintenance` leaves in `backend/backups/` |
+| `BACKUP_KEEP` | No | `14` | Backup files `manage.py maintenance` leaves in the backups folder |
+| `MAINTENANCE_HOUR` | No | `2` | Hour (Manila time) at which `manage.py maintenance_loop` runs the upkeep; used by the cloud container |
+| `DATA_DIR` | No | `backend/` | Folder for everything OCRIS writes: `db.sqlite3`, `media/`, `logs/` and `backups/`. On a cloud host, the persistent disk |
+| `FRONTEND_DIST` | No | not set | The built site (`frontend/dist`). When set, the backend serves it on its own address, so the site and the API share one; the cloud container sets it |
+| `ENABLE_DJANGO_ADMIN` | No | same as `DEBUG` | Django's admin site at `/admin/`. Off in production: changes made there skip the audit log and its sign-in has no limit on wrong passwords |
 | `TOKEN_TTL_HOURS` | No | `12` | Hours a sign-in stays valid |
 | `IDLE_TIMEOUT_MINUTES` | No | `30` | Minutes a sign-in may go without use before it ends; `0` turns this off |
 | `LOGIN_MAX_ATTEMPTS` | No | `5` | Wrong passwords for one username before sign-in is refused |
@@ -67,10 +71,11 @@ On macOS or Linux, use `source venv/bin/activate` and `cp .env.example .env`.
 | `LOGIN_LOCKOUT_MINUTES` | No | `15` | How long failures count, and so how long a lock lasts |
 | `RESET_MAX_REQUESTS` | No | `5` | "Forgot password" requests per address per window |
 | `TRUSTED_PROXY_COUNT` | No | `1` when HTTPS is required, else `0` | Proxies in front of the server (a cloud host's load balancer is one). Needed so the real address of a caller is used for the limits above. |
-| `AUTH_COOKIE_SAMESITE` | No | `None` with HTTPS, else `Lax` | Use `None` (needs HTTPS) when the site and the server are on different domains; `Lax` or `Strict` when they share one |
+| `AUTH_COOKIE_SAMESITE` | No | `None` with HTTPS and no `FRONTEND_DIST`, else `Lax` | Use `None` (needs HTTPS) only when the site and the server are on different domains; `Lax` when they share one |
 | `MAX_UPLOAD_MB` | No | `20` | Largest scan accepted |
-| `AUDIT_LOG_FILE` | No | `backend/logs/audit.jsonl` | File every audit entry is also appended to |
+| `AUDIT_LOG_FILE` | No | `logs/audit.jsonl` in `DATA_DIR` | File every audit entry is also appended to |
 | `OCR_CONFIDENCE_THRESHOLD` | No | `90` | A grade read from a scan is auto-approved only above this confidence (%). Lower it to review fewer grades by hand, at more risk of a wrong one. |
+| `OCR_MAX_CONCURRENT` | No | `2` | Forms one server process reads at the same time (about 300 MB each); further uploads wait their turn |
 | `REQUIRE_HTTPS` | No | `True` when `DEBUG` is `False` | Redirects plain HTTP to HTTPS and sends cookies over HTTPS only |
 | `SEED_PASSWORD` | Yes, for seeding | none | Password given to the default accounts by `seed.py` |
 | `TESSERACT_CMD` | Only if Tesseract is not on `PATH` | empty | Full path to the Tesseract executable, e.g. `C:\Program Files\Tesseract-OCR\tesseract.exe` |
@@ -149,6 +154,8 @@ python manage.py changepassword <username>
 | `python manage.py backup` | `backend/` | Writes a dated zip of the accounts, MongoDB data and scans into `backend/backups/`. `--keep N` then deletes all but the newest N backups |
 | `python manage.py restore <file>` | `backend/` | Puts a backup back (accounts, MongoDB, scans). Without `--yes` it only lists what the backup holds. Takes a safety backup of the current data first |
 | `python manage.py maintenance` | `backend/` | The routine upkeep for a schedule: a backup (keeping `BACKUP_KEEP`, 14), removal of old unsaved uploads, the MongoDB indexes, and the audit file check |
+| `python manage.py maintenance_loop` | `backend/` | Runs `maintenance` every night at `MAINTENANCE_HOUR` for as long as it runs (`--once` to check once). The cloud container starts it; on a school server, schedule `maintenance` instead |
+| `python manage.py create_oic <username> --first-name … --last-name …` | `backend/` | Creates an Officer in Charge account with a temporary password, printed once, to be changed at the first sign-in. For a new server, in place of `seed.py` |
 | `python manage.py verify_audit` | `backend/` | Checks that no line of the audit file was changed, added, moved or removed, and that it holds every entry the database holds; exit code 1 when it finds a change (see SECURITY.md) |
 | `python manage.py create_indexes` | `backend/` | Creates the MongoDB indexes that are missing (the server also does it by itself) |
 | `python manage.py cleanup_scans` | `backend/` | Deletes uploads never saved as a record and older than 7 days (`--days N`, `--dry-run`). The server also does this by itself (see below). With `--deleted-days N` it also purges scans kept after their record was deleted more than N days ago |
@@ -168,6 +175,8 @@ python manage.py changepassword <username>
 | Uploaded scan images (encrypted when `DATA_ENCRYPTION_KEY` is set) | `backend/media/scans/` | No |
 | A second copy of the audit log, one JSON line per entry | `backend/logs/audit.jsonl` | No |
 
+The files in `backend/` move to the folder `DATA_DIR` names when it is set (the cloud set-up keeps them on its persistent disk).
+
 To back the system up, run `python manage.py backup`, which copies the first three into one dated zip file in `backend/backups/`. With `DATA_ENCRYPTION_KEY` set the zip is encrypted as a whole (`.zip.enc`); without it the command warns that the backup is not encrypted. Copy `backend/logs/audit.jsonl` too. Keep the backups somewhere other than this computer, and keep the encryption key somewhere else again. To restore, stop the server and run `python manage.py restore backups/<file>` to see what the backup holds, then again with `--yes` to replace the current accounts, records, scans, audit log and sections with it (an encrypted backup needs the same `DATA_ENCRYPTION_KEY`). The current data is backed up into `backups/before-restore/` first unless you add `--skip-safety-backup`. Scan files in the backup are added to the scans folder; files that are only on the server are left alone. Start the server again afterwards, and sign-in cookies of the old sessions that are not in the backup stop working. **Rehearse a restore on a copy before you need it.**
 
 ### Scheduled backups
@@ -184,6 +193,8 @@ A backup that stays on the same disk does not protect against that disk failing:
 A form that was read but never saved is kept for `PENDING_SCAN_DAYS` (default 7) so that its user can carry on from the Upload page. After that the server deletes it, with its file, by itself: whenever someone uploads, at most once an hour. Set `PENDING_SCAN_DAYS=0` to keep them until `cleanup_scans` is run.
 
 **Switching encryption on for an existing system:** add `DATA_ENCRYPTION_KEY` to `.env`, restart the server, then run `python manage.py encrypt_scans` once. After upgrading to this version, run `python manage.py migrate` once; everyone is signed out and signs in again (the old token table is no longer used).
+
+**Upgrading to the version with the cloud set-up (2026-10-18):** run `pip install -r requirements.txt` once (WhiteNoise, and since 2026-10-25 Django 5.2.18 with Django REST Framework 3.17.1). No migration is needed. Nothing else changes for a computer at the school.
 
 **Upgrading to the 2026-10-18 version:** run `python manage.py migrate` once (it adds the sessions' last-use time and replaces each stored session key by its hash; until then signed-in requests fail). Sessions stay signed in.
 
@@ -207,4 +218,6 @@ To start over with an empty system, delete `db.sqlite3` and `media/scans/`, drop
 
 ## 10. Deploying beyond one computer
 
-The configuration in this repository is for development. Before putting OCRIS on a shared or public server, read the deployment items in [LIMITATIONS.md](LIMITATIONS.md) and [SECURITY.md](SECURITY.md). At minimum: set `DEBUG=False` and a strong `SECRET_KEY`, set `ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS` to the real addresses, turn on MongoDB authentication, serve over HTTPS, run Django behind a production server instead of `runserver`, and schedule `python manage.py maintenance` (see "Scheduled backups" above).
+**On a cloud host (Render):** follow [DEPLOYMENT.md](DEPLOYMENT.md). The repository has a `Dockerfile` and a `render.yaml` that do the steps below.
+
+**On a server at the school:** the configuration in this repository is for development. Before putting OCRIS on a shared server, read the deployment items in [LIMITATIONS.md](LIMITATIONS.md) and [SECURITY.md](SECURITY.md). At minimum: set `DEBUG=False` and a strong `SECRET_KEY`, set `ALLOWED_HOSTS` and `CORS_ALLOWED_ORIGINS` to the real addresses, turn on MongoDB authentication, serve over HTTPS, run Django behind a production server instead of `runserver`, and schedule `python manage.py maintenance` (see "Scheduled backups" above).

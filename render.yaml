@@ -1,0 +1,30 @@
+# Render Blueprint for OCRIS: one Docker web service in Singapore with a persistent disk.
+# How to use it, the values to fill in and the first sign-in: docs/DEPLOYMENT.md
+services:
+  - type: web
+    name: ocris
+    runtime: docker
+    region: singapore
+    plan: 1c-2g                    # reading a form takes about 300 MB; 512 MB is too small
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health/
+    autoDeployTrigger: "off"       # each deploy restarts the server: deploy by hand, outside school hours
+    maxShutdownDelaySeconds: 90    # lets a form that is being read finish first
+    disk:
+      name: ocris-data
+      mountPath: /var/data         # DATA_DIR in the Dockerfile: accounts, scans, audit file, backups
+      sizeGB: 10
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_ENCRYPTION_KEY   # generate it yourself and keep a copy off Render (see the guide)
+        sync: false
+      - key: MONGO_URI             # the MongoDB Atlas connection string
+        sync: false
+      - key: MONGO_DB_NAME
+        value: ocris_bcs
+      - key: BACKUP_KEEP
+        value: "7"                 # Render also snapshots the disk every day
+      - key: TRUSTED_PROXY_COUNT
+        value: "1"                 # check it after the first deploy: /api/server/client-address/

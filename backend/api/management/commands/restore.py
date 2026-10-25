@@ -37,7 +37,7 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.WARNING('Nothing was changed. Restoring replaces the current data with the above; run again with --yes.'))
                 return
             if not skip_safety_backup:
-                call_command('backup', out=str(Path(settings.BASE_DIR) / 'backups' / 'before-restore'), stdout=self.stdout)
+                call_command('backup', out=str(Path(settings.BACKUP_DIR) / 'before-restore'), stdout=self.stdout)
             self._restore_accounts(root / 'db.sqlite3')
             for name, docs in contents.items():
                 collection = db.get_db()[name]

@@ -1,5 +1,4 @@
 """The routine upkeep in one command, meant to be run on a schedule (for example every night)."""
-from pathlib import Path
 
 from django.conf import settings
 from django.core.management import call_command
@@ -11,7 +10,7 @@ class Command(BaseCommand):
             'MongoDB indexes exist and check the audit file. Schedule this daily (see docs/INSTALLATION.md).')
 
     def add_arguments(self, parser):
-        parser.add_argument('--out', default=str(Path(settings.BASE_DIR) / 'backups'), help='Folder for the backups.')
+        parser.add_argument('--out', default=str(settings.BACKUP_DIR), help='Folder for the backups.')
         parser.add_argument('--keep', type=int, default=settings.BACKUP_KEEP, help='Backups to keep (default BACKUP_KEEP, 14).')
         parser.add_argument('--skip-backup', action='store_true', help='Only delete abandoned uploads.')
 

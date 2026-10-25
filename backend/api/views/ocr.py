@@ -1,5 +1,7 @@
 import mimetypes
+import threading
 
+from django.conf import settings
 from django.http import FileResponse
 from django.utils.http import content_disposition_header
 from rest_framework.decorators import api_view, permission_classes
@@ -12,6 +14,11 @@ from ..ocr.engine import OCRError, compute_confidence_summary, get_image_quality
 from ..serializers import ValidationSubmitSerializer
 from ..services import crypto, grading, identity, maintenance, storage, uploads
 from ..utils.http import detail, no_class_assigned, not_found, outside_own_class, page_param
+
+# Reading one form takes about 300 MB (mostly Tesseract) for 30 to 70 seconds. Uploads beyond this
+# many in one server process wait their turn, so several people uploading at once cannot run the
+# server out of memory, which would restart it and drop every upload in progress.
+_reading_slots = threading.BoundedSemaphore(max(1, settings.OCR_MAX_CONCURRENT))
 
 
 @api_view(['POST'])
@@ -55,7 +62,7 @@ def ocr_upload(request):
     stored_name, path = storage.save_upload(file)
     try:
         known_sections = [section['name'] for node in db.section_tree() for section in node['sections']]
-        with storage.plain_copy(path) as readable:
+        with _reading_slots, storage.plain_copy(path) as readable:
             fields, page_text, notes = read_scan(str(readable), known_sections)
             quality = get_image_quality(str(readable))
     except OCRError as e:

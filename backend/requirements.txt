@@ -1,9 +1,13 @@
-django==4.2.16
-djangorestframework==3.15.2
-django-cors-headers==4.3.1
+Django==5.2.18
+djangorestframework==3.17.1
+django-cors-headers==4.9.0
 pymongo==4.6.3
 python-dotenv==1.0.1
 Pillow==10.4.0
 pytesseract==0.3.10
 pypdfium2==4.30.0
 cryptography>=42
+# Serving the built site from the API's own address (cloud set-up)
+whitenoise==6.12.0
+# Production web server for Linux (the cloud container); on Windows use runserver for development
+gunicorn==26.2.0; sys_platform != "win32"

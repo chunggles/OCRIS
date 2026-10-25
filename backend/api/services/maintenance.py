@@ -3,6 +3,7 @@ import logging
 import threading
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from django.conf import settings
 
@@ -61,3 +62,25 @@ def reset_schedule():
     """Make the next cleanup_if_due() run at once (for tests)."""
     global _last_check
     _last_check = 0.0
+
+
+def newest_backup_time(folder):
+    """When the newest backup in `folder` was written (local time), or None if there is none."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        return None
+    times = [f.stat().st_mtime for f in folder.iterdir()
+             if f.is_file() and f.name.startswith('ocris-backup-') and f.name.endswith(('.zip', '.zip.enc'))]
+    return datetime.fromtimestamp(max(times)) if times else None
+
+
+def upkeep_due(now, newest_backup, hour):
+    """
+    Whether the daily upkeep should run at `now` (local time): at `hour` once the newest backup is
+    more than 20 hours old; at any hour once it is more than 26 hours old, because the server was
+    down at that hour; and at once when there is no backup yet.
+    """
+    if newest_backup is None:
+        return True
+    age = now - newest_backup
+    return age > timedelta(hours=26) or (now.hour == hour and age > timedelta(hours=20))

@@ -1,12 +1,12 @@
 # API Reference
 
-Base URL: `http://localhost:8000/api`
+Base URL: `http://localhost:8000/api` in development; `https://<site>/api` on a server that also serves the site (the cloud set-up, [DEPLOYMENT.md](DEPLOYMENT.md)).
 
 All routes are defined in `backend/api/urls.py`.
 
 ## Conventions
 
-**Authentication.** `POST /auth/login/` sets an **HttpOnly cookie** (`ocris_session`). Every other endpoint except `/auth/forgot-password/` needs that cookie, which the browser sends by itself; scripts on the page cannot read it. The cookie is not returned in the response body.
+**Authentication.** `POST /auth/login/` sets an **HttpOnly cookie** (`ocris_session`). Every other endpoint except `/auth/forgot-password/` and `/health/` needs that cookie, which the browser sends by itself; scripts on the page cannot read it. The cookie is not returned in the response body.
 
 **Request header.** Every request that changes data (`POST`, `PUT`, `PATCH`, `DELETE`), including login, must carry `X-OCRIS-Request: 1`. A request without it gets `403`. Another website cannot add a custom header to a request it sends for the user, so this stops forged requests. A browser client must also send credentials (`fetch(..., { credentials: 'include' })`) and be served from an origin listed in `CORS_ALLOWED_ORIGINS`.
 
@@ -68,6 +68,8 @@ All routes are defined in `backend/api/urls.py`.
 | POST | `/users/create/` | OIC | Create a user |
 | GET, PATCH, DELETE | `/users/<id>/` | OIC | View, edit or delete a user |
 | GET | `/audit/` | OIC, Admin | Audit log |
+| GET | `/health/` | Public | For the host's health check |
+| GET | `/server/client-address/` | OIC | The caller's address as the server sees it, to set `TRUSTED_PROXY_COUNT` |
 
 ---
 
@@ -556,3 +558,28 @@ Access: OIC, Admin. Paginated list, newest first.
 ```
 
 The actions and their details are listed in [DATABASE.md](DATABASE.md#audit_log).
+
+---
+
+## Server
+
+### GET `/health/`
+
+Access: public, no cookie. Response `200` `{"status": "ok"}` while the server is running. It does not touch the databases. With HTTPS required it is the one path that also answers over plain HTTP, because the host's health check comes that way.
+
+### GET `/server/client-address/`
+
+Access: OIC. What the server sees of the caller's address, to check `TRUSTED_PROXY_COUNT` on a new host ([DEPLOYMENT.md](DEPLOYMENT.md), step 6.3).
+
+```json
+{
+  "address_used": "203.0.113.5",
+  "trusted_proxy_count": 3,
+  "x_forwarded_for": ["203.0.113.5", "104.16.0.1", "10.0.0.5"],
+  "remote_addr": "10.0.0.7",
+  "cf_connecting_ip": "203.0.113.5",
+  "suggested_trusted_proxy_count": 3
+}
+```
+
+`address_used` is the address the sign-in limits count, and must be the caller's own public address. `suggested_trusted_proxy_count` is worked out from Cloudflare's `CF-Connecting-IP` header when there is one (as on Render), else `null`.

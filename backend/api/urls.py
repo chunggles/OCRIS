@@ -1,8 +1,12 @@
 from django.urls import path
 
-from .views import analytics, audit, auth, ocr, records, sections, users
+from .views import analytics, audit, auth, ocr, records, sections, server, users
 
 urlpatterns = [
+    # Server checks
+    path('health/',                 server.health,         name='health'),
+    path('server/client-address/',  server.client_address, name='client-address'),
+
     # Auth
     path('auth/login/',  auth.login_view,  name='login'),
     path('auth/logout/', auth.logout_view, name='logout'),

@@ -5,6 +5,7 @@ They need MongoDB running and use a throwaway database (ocris_test_...) that is 
 after every test, so the real database is never touched. Without MongoDB they are skipped.
 """
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timedelta
 from io import BytesIO, StringIO
@@ -16,7 +17,8 @@ from django.conf import settings
 from cryptography.fernet import Fernet
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.http import HttpResponse
+from django.test import RequestFactory, SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -1548,3 +1550,119 @@ class ReliabilityTests(ApiTestCase):
         out = StringIO()
         call_command('create_indexes', stdout=out)
         self.assertIn('records:', out.getvalue())
+
+
+class DeploymentTests(ApiTestCase):
+    """The cloud set-up: health check, the address check, the first OIC and the daily upkeep."""
+
+    def test_health_check_needs_no_sign_in(self):
+        response = APIClient().get('/api/health/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'status': 'ok'})
+
+    def test_client_address_is_shown_to_the_oic_only(self):
+        headers = {'HTTP_X_FORWARDED_FOR': '6.6.6.6, 203.0.113.5, 104.16.0.1, 10.0.0.5',
+                   'HTTP_CF_CONNECTING_IP': '203.0.113.5'}
+        self.assertEqual(self.as_user(self.teacher).get('/api/server/client-address/', **headers).status_code, 403)
+        self.assertEqual(self.as_user(self.admin).get('/api/server/client-address/', **headers).status_code, 403)
+        with self.settings(TRUSTED_PROXY_COUNT=1):
+            seen = self.as_user(self.oic).get('/api/server/client-address/', **headers).data
+        self.assertEqual(seen['address_used'], '10.0.0.5')    # a proxy, not the caller
+        self.assertEqual(seen['suggested_trusted_proxy_count'], 3)
+        self.assertEqual(seen['x_forwarded_for'], ['6.6.6.6', '203.0.113.5', '104.16.0.1', '10.0.0.5'])
+        with self.settings(TRUSTED_PROXY_COUNT=3):
+            seen = self.as_user(self.oic).get('/api/server/client-address/', **headers).data
+        self.assertEqual(seen['address_used'], '203.0.113.5')   # not the 6.6.6.6 the caller wrote
+
+    def test_create_oic_makes_an_oic_with_a_temporary_password(self):
+        out = StringIO()
+        call_command('create_oic', 'principal', '--first-name', 'Ana', '--last-name', 'Reyes', stdout=out)
+        password = next(line.split(': ', 1)[1] for line in out.getvalue().splitlines() if line.startswith('Temporary password'))
+        user = OCRISUser.objects.get(username='principal')
+        self.assertEqual(user.role, OCRISUser.OIC)
+        self.assertTrue(user.must_change_password)
+        self.assertTrue(user.check_password(password))
+        self.assertEqual(db.users_col().find_one({'username': 'principal'})['role'], OCRISUser.OIC)
+        self.assertEqual(db.audit_col().find_one({'action': 'CREATE_USER'})['details']['new_user'], 'principal')
+        with self.assertRaises(CommandError):   # an existing username is refused, not changed
+            call_command('create_oic', 'principal', '--first-name', 'B', '--last-name', 'C', stdout=StringIO())
+        self.assertTrue(OCRISUser.objects.get(username='principal').check_password(password))
+
+    def test_upkeep_runs_once_a_day_at_the_set_hour(self):
+        due = maintenance.upkeep_due
+        night = datetime(2026, 10, 20, 2, 5)
+        self.assertTrue(due(night, None, 2))                                    # no backup yet
+        self.assertTrue(due(night, night - timedelta(hours=24), 2))
+        self.assertFalse(due(night, night - timedelta(hours=1), 2))             # already done tonight
+        self.assertFalse(due(night.replace(hour=14), night - timedelta(hours=12), 2))
+        self.assertTrue(due(night.replace(hour=14), night - timedelta(hours=40), 2))   # missed: catch up
+
+    def test_maintenance_loop_backs_up_when_due(self):
+        folder = Path(self.media) / 'backups'
+        with self.settings(BACKUP_DIR=folder, DATA_ENCRYPTION_KEYS=[]):
+            call_command('maintenance_loop', '--once', stdout=StringIO())
+            self.assertEqual(len(list(folder.glob('ocris-backup-*.zip'))), 1)
+            self.assertIsNotNone(maintenance.newest_backup_time(folder))
+            call_command('maintenance_loop', '--once', stdout=StringIO())   # not due again
+        self.assertEqual(len(list(folder.glob('ocris-backup-*.zip'))), 1)
+
+    def test_forms_are_read_a_few_at_a_time(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from api.ocr.engine import OCRError
+        slots = threading.BoundedSemaphore(1)
+        held = []
+
+        def read(path, known_sections):
+            held.append(not slots.acquire(blocking=False))   # the upload holds the only slot
+            return [{'field': 'English Final', 'value': '88', 'raw': '88', 'conf': 95, 'status': 'ok'}], '', []
+
+        def upload():
+            data = {'file': SimpleUploadedFile('form.png', tiny_png(), 'image/png'), 'pupil_name': 'Santos, Maria',
+                    'grade_level': 'Grade 6', 'section': 'Sampaguita', 'school_year': '2024-2025'}
+            return self.as_user(self.teacher).post('/api/ocr/upload/', data, format='multipart')
+
+        with patch('api.views.ocr._reading_slots', slots):
+            with patch('api.views.ocr.read_scan', side_effect=read):
+                self.assertEqual(upload().status_code, 200)
+            with patch('api.views.ocr.read_scan', side_effect=OCRError('No text found')):
+                self.assertEqual(upload().status_code, 422)
+        self.assertEqual(held, [True])
+        self.assertTrue(slots.acquire(blocking=False))   # given back after a reading, and after a failed one
+
+    def test_users_mirror_drops_accounts_deleted_outside_the_app(self):
+        self.as_user(self.oic).get('/api/users/')
+        self.assertIsNotNone(db.users_col().find_one({'username': 'newteacher'}))
+        self.unassigned.delete()   # as the shell or the admin site would, without the app knowing
+        self.as_user(self.oic).get('/api/users/')
+        self.assertIsNone(db.users_col().find_one({'username': 'newteacher'}))
+        self.assertIsNotNone(db.users_col().find_one({'username': 'teacher'}))
+
+
+@override_settings(STATIC_ROOT=None)
+class FrontendServingTests(SimpleTestCase):
+    """The built site as the cloud container serves it (FRONTEND_DIST)."""
+
+    def test_site_and_assets_are_served_with_their_headers(self):
+        from whitenoise.middleware import WhiteNoiseMiddleware
+        from ocris_backend import frontend
+
+        dist = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (dist / 'index.html').write_text('<!doctype html><div id="root"></div>')
+        (dist / 'assets').mkdir()
+        (dist / 'assets' / 'index-3f9a1c.js').write_text('console.log(1)')
+        with self.settings(WHITENOISE_ROOT=dist, WHITENOISE_INDEX_FILE=True,
+                           WHITENOISE_IMMUTABLE_FILE_TEST=frontend.is_immutable,
+                           WHITENOISE_ADD_HEADERS_FUNCTION=frontend.add_headers):
+            serve = WhiteNoiseMiddleware(lambda request: HttpResponse('from Django', status=404))
+        get = RequestFactory().get
+
+        page = serve(get('/'))
+        self.addCleanup(page.close)   # releases the file
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(page['X-Frame-Options'], 'DENY')
+        self.assertEqual(page['Cache-Control'], 'no-cache')
+        script = serve(get('/assets/index-3f9a1c.js'))
+        self.addCleanup(script.close)
+        self.assertEqual(script.status_code, 200)
+        self.assertIn('immutable', script['Cache-Control'])
+        self.assertEqual(serve(get('/api/records/')).content, b'from Django')   # the API is not shadowed

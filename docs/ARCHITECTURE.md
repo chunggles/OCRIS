@@ -39,9 +39,32 @@ flowchart LR
 
 SQLite is the source of truth for users. A copy of each user (without the password) is mirrored to a MongoDB `users` collection for reference.
 
+### In the cloud
+
+On a cloud host the same parts run in one Docker container (`Dockerfile`, `render.yaml`; set-up in [DEPLOYMENT.md](DEPLOYMENT.md)):
+
+```mermaid
+flowchart LR
+    B[Browser] -- "HTTPS, one address" --> P[Render's proxy]
+    subgraph C["Container (Render, Singapore)"]
+        G[gunicorn<br/>2 processes x 4 threads] --> W[WhiteNoise<br/>built React site]
+        G --> D[Django API + OCR<br/>Tesseract 5.5]
+        M[maintenance_loop<br/>nightly backup]
+    end
+    P --> G
+    D --> DISK[("Persistent disk /var/data<br/>db.sqlite3, scans,<br/>audit file, backups")]
+    M --> DISK
+    D --> ATLAS[(MongoDB Atlas<br/>Singapore)]
+```
+
+- **One address for the site and the API.** Django serves the built site (`FRONTEND_DIST`) through WhiteNoise, so the frontend calls `/api` on its own address, the sign-in cookie is `SameSite=Lax` and no CORS is needed.
+- **One persistent disk** (`DATA_DIR`) holds everything the server writes; the rest of the container is replaced on every deploy. A disk allows only one instance.
+- **OCR stays inside the upload request.** Render allows long requests, and the threads of the web server keep other requests answered while a form is read (about 300 MB and 30 to 70 seconds each).
+- **The nightly upkeep** runs next to the web server (`maintenance_loop`), because the host's scheduled jobs cannot reach the disk.
+
 ## 2. Backend
 
-Location: `backend/`. Framework: Django 4.2 with Django REST Framework.
+Location: `backend/`. Framework: Django 5.2 with Django REST Framework.
 
 ```
 backend/
@@ -150,7 +173,7 @@ frontend/src/
 
 ### Talking to the backend
 
-All requests go through `utils/api.js`, which:
+All requests go through `utils/api.js`, which calls `VITE_API_URL` (`http://localhost:8000/api` in development, `/api` in the cloud build) and:
 
 - sends every request with the sign-in cookie (`credentials: 'include'`) and the `X-OCRIS-Request` header; the cookie is HttpOnly, so the frontend never holds or stores a token;
 - on a `401` response, returns to the login screen (except for the check made when the page opens);
@@ -237,7 +260,7 @@ Roles are stored on the user model (`OCRISUser.role`). Permissions are enforced 
 
 ## 6. Configuration
 
-All environment-specific settings are read from `backend/.env` and `frontend/.env`; see [INSTALLATION.md](INSTALLATION.md). Settings fixed in `settings.py` that affect behaviour:
+All environment-specific settings are read from `backend/.env` and `frontend/.env` (on Render, from the service's environment); see [INSTALLATION.md](INSTALLATION.md) and [DEPLOYMENT.md](DEPLOYMENT.md). Settings fixed in `settings.py` that affect behaviour:
 
 | Setting | Value | Effect |
 |---|---|---|

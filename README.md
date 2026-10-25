@@ -32,11 +32,12 @@ OCRIS turns scanned paper **Form 137** permanent records into searchable digital
 | Layer | Technology |
 |---|---|
 | Frontend | React 18, Vite 5, plain CSS |
-| Backend | Python, Django 4.2, Django REST Framework 3.15 |
+| Backend | Python, Django 5.2, Django REST Framework 3.17 |
 | OCR | Tesseract 5 through `pytesseract`, image processing with Pillow |
 | Record storage | MongoDB (records, scans, audit log) through `pymongo` |
 | Account storage | SQLite (user accounts and login sessions) |
-| Authentication | Token authentication (DRF `authtoken`) |
+| Authentication | HttpOnly session cookie, sessions stored in SQLite |
+| Hosting (cloud) | One Docker container on Render (gunicorn, WhiteNoise) with a persistent disk; MongoDB Atlas |
 
 ## Quick start
 
@@ -71,6 +72,7 @@ The app opens at <http://localhost:3000>. Sign in as `k.saquing` with the `SEED_
 | Document | Contents |
 |---|---|
 | [docs/INSTALLATION.md](docs/INSTALLATION.md) | Prerequisites, setup, configuration, default accounts, troubleshooting |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Putting OCRIS on Render with MongoDB Atlas: set-up, first sign-in, backups, updates |
 | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | How to use every screen, written for school staff |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, components, data flow, project structure |
 | [docs/OCR_PIPELINE.md](docs/OCR_PIPELINE.md) | How a scan becomes a record: quality check, table reading, grading rules |
@@ -88,11 +90,14 @@ OCRIS_v3/
   backend/            Django REST API, OCR engine, database access
     api/              the application: views, OCR, services, models
     ocris_backend/    Django project settings and root URLs
-    seed.py           creates the default user accounts
+    seed.py           creates the default user accounts (development only)
+    start.sh          starts the server in the cloud container
   frontend/           React single-page application
     src/pages/        one file per screen
     src/components/   shared layout and UI components
     src/utils/        API client and helpers
   docs/               project documentation
+  Dockerfile          the cloud container (site, API and Tesseract in one)
+  render.yaml         the Render service, its disk and settings
   CHANGELOG.md
 ```

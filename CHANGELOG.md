@@ -1,5 +1,40 @@
 # OCRIS v3: Changelog
 
+## 2026-10-25 (pre-launch fixes)
+
+From a check of what is left before the soft launch ([docs/WEAKNESSES_2026-10-11.md](docs/WEAKNESSES_2026-10-11.md), sections 7 and 8).
+
+**To apply it:** run `pip install -r requirements.txt` once (Django 5.2). No migration.
+
+- **Django 4.2.30 → 5.2.18**, supported until April 2028 (4.2 had no security fixes since April 2026), with Django REST Framework 3.15.2 → 3.17.1 and django-cors-headers 4.3.1 → 4.9.0. No code or migration changes were needed: `check` and `makemigrations --check` are clean, and the tests pass with Django's deprecation warnings turned into errors. `check --deploy` in production settings leaves only the two optional HSTS settings (subdomains and preload), which stay off.
+- **At most 2 forms read at once per server process** (`OCR_MAX_CONCURRENT`). The cloud container's 2 processes of 4 threads could read 8 forms at once, about 2.5 GB on the 2 GB instance; an out-of-memory restart would drop every upload in progress. Now at most 4 (about 1.2 GB); further uploads wait their turn. The decrypted temporary copy of a scan is only made once its turn comes.
+- **85 seconds for a form being read to finish when the server stops** (gunicorn's `graceful_timeout`, was 60), within the 90 seconds Render waits (`maxShutdownDelaySeconds`). A form takes up to 70.
+- **The MongoDB `users` mirror drops deleted accounts.** Viewing the user list removes profiles whose account no longer exists in SQLite (deleted through the shell or the admin site).
+- **Tests:** 2 new (119 in all, all passing, on Django 5.2.18): an upload holds a reading slot and gives it back, also when the OCR fails; the mirror loses an account deleted outside the app.
+- **Docs updated:** README, ARCHITECTURE.md, DATABASE.md (`users`), INSTALLATION.md (setting, upgrade step), DEPLOYMENT.md (settings, memory, shutdown), LIMITATIONS.md, WEAKNESSES_2026-10-11.md (two items ticked, new section 8).
+- **Not done:** nothing has run on Render yet, and these changes were not clicked through in a browser.
+
+## 2026-10-18 (cloud deployment on Render)
+
+Items 1 to 4 of [docs/WEAKNESSES_2026-10-11.md](docs/WEAKNESSES_2026-10-11.md): OCRIS can now be put on Render, in one Docker container with a persistent disk, with MongoDB Atlas for the records. Step-by-step guide: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md). Accounts stay in SQLite (on the disk), by decision.
+
+**To apply it on a development computer:** run `pip install -r requirements.txt` once (Django 4.2.30 and WhiteNoise). Nothing else changes locally: with no `DATA_DIR` the files stay where they were.
+
+- **`Dockerfile`** (repository root): builds the React site with `VITE_API_URL=/api`, then a Python 3.12 image on Debian 13 with Tesseract 5.5.0. The build checks that the English model is the same file as on the development computer (`tessdata_fast` 4.1.0, by SHA-256) and stops otherwise, since the confidence threshold was set with it (checked: Debian 13's `tesseract-ocr-eng` 4.1.0-2 holds exactly that file, and both base images exist). `OMP_THREAD_LIMIT=1` so several readings share the CPU. `.dockerignore` keeps `.env`, the databases, scans, backups and logs out of the image.
+- **`render.yaml`**: one web service in Singapore, instance `1c-2g`, a 10 GB disk at `/var/data`, health check `/api/health/`, deploys by hand (each one stops the server), 90 seconds for a form being read to finish. `SECRET_KEY` is generated; `MONGO_URI` and `DATA_ENCRYPTION_KEY` are entered in the dashboard.
+- **`backend/start.sh` and `gunicorn.conf.py`**: applies migrations, stops with a clear log line when MongoDB cannot be reached, starts the nightly upkeep, then gunicorn with 2 processes of 4 threads and a 180-second limit. The access log leaves out query strings, so pupils' names typed in a search do not reach the host's logs.
+- **`DATA_DIR`**: one setting for where `db.sqlite3`, `media/`, `logs/audit.jsonl` and `backups/` go (default `backend/`, as before). `backup`, `maintenance` and `restore` use it.
+- **The site and the API on one address.** With `FRONTEND_DIST` set, Django serves the built site through WhiteNoise: `index.html` never cached, `/assets/` cached for good, `X-Frame-Options: DENY`. The sign-in cookie is then `SameSite=Lax` by default, which closes the "idle session kept open by another site" item, and no CORS is needed.
+- **Safer production defaults:** with `DEBUG` off, `CORS_ALLOWED_ORIGINS` is empty unless set (it allowed `localhost:3000` before), and Django's admin site is off unless `ENABLE_DJANGO_ADMIN=True` (its sign-in has no limit on wrong passwords and its changes skip the audit log). `RENDER_EXTERNAL_HOSTNAME` is added to `ALLOWED_HOSTS` by itself. The health check is the one path answered over plain HTTP.
+- **`GET /api/health/`** for the host, and **`GET /api/server/client-address/`** (OIC only), which shows the caller's address as the server sees it and suggests `TRUSTED_PROXY_COUNT`. Sources disagree about how many proxies Render puts in front, so the guide has this checked after the first deploy.
+- **`manage.py create_oic`**: makes the first Officer in Charge on a new server with a random temporary password, shown once and to be changed at the first sign-in, instead of `seed.py`'s demo accounts.
+- **`manage.py maintenance_loop`**: runs `maintenance` every night at `MAINTENANCE_HOUR` (2, Manila time), and catches up when the server was down then. The container starts it, because Render's scheduled jobs cannot reach the disk.
+- **Django 4.2.16 → 4.2.30**, the last 4.2 release, with 14 releases of security fixes. Django 4.2 itself is no longer supported (April 2026); moving to 5.2 is now on the weaknesses list.
+- **Measured for sizing:** reading one stored form took 43 to 50 seconds and peaked at about 320 MB (Python 154 MB, Tesseract 211 MB), so the 512 MB plan is too small. A batch upload reads its forms one after another, so memory grows with the number of people uploading at once, not with the batch.
+- **Tests:** 6 new (117 in all, all passing, on Django 4.2.30): the health check, the address check and who may see it, `create_oic`, the timing of the nightly upkeep and `maintenance_loop --once`, and the built site served with its headers without hiding the API. **Checked in production mode on Windows** (`DEBUG=False`, a separate data folder and database): plain HTTP redirected, security headers, the asset cache, `/admin/` gone, no CORS, sign-in with a `SameSite=Lax; Secure; HttpOnly` cookie, the temporary password enforced, an archive-only upload stored encrypted under `DATA_DIR` and downloaded unchanged, an OCR upload, and the nightly backup with `restore`'s listing. The real data and audit file were not touched.
+- **Not done or not checked:** the Docker image has not been built (no Docker on the development computer), so the first Render deploy is its first build; nothing has run on Render yet. OCR still runs inside the upload request. The copy of backups away from Render is by hand. The pages were not clicked through in a browser in production mode.
+- **Docs:** new DEPLOYMENT.md; INSTALLATION.md (settings, commands, upgrade step, section 10), SECURITY.md (cookie, admin site, proxies, image), API.md (two endpoints), ARCHITECTURE.md (the cloud set-up), LIMITATIONS.md (items 4, 11, 14 to 16, recommendations, tests), WEAKNESSES_2026-10-11.md (items 1 to 4 ticked, section 6 updated, new section 7), README.
+
 ## 2026-10-18 (fixes found in a review of the remaining weaknesses)
 
 - **Bug fixed: one half-written line broke the audit check for good.** If the server stopped while writing a line of `backend/logs/audit.jsonl`, the next entry started the chain over, so `verify_audit` (and every `maintenance` run) failed from then on, and nothing could clear it short of editing the file. The next entry now follows the last whole line and records the half line's SHA-256 (`cut`); `verify_audit` lists the half line as a note. The half line changed or removed afterwards, or an unreadable line that is not a crash, is still reported. `verify_audit` also no longer stops on a line cut in the middle of a letter. The test for this case now checks the whole result (it only looked at the first finding before, which is how the bug got through).
@@ -648,4 +683,5 @@ User accounts can now be permanently deleted from User Management. Each row has 
 #to be fixed
 upload - more form formats 90's- 2020's (old for archiving)
 search and records - search filter aand etc.
-filling of form 137 - remove remarks bar, quarter rating (1,2,3,4) change to term (1,2,3), manual subject filling
+soft/test launch - configure render
+ui - more friendly ui elements

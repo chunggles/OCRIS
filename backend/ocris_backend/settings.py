@@ -10,6 +10,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+# Where everything OCRIS writes is kept: the accounts database, the uploaded scans, the audit file and
+# the backups. On a cloud host point it at the persistent disk (Render: /var/data); the rest of the
+# server's files are replaced on every deploy.
+DATA_DIR = Path(os.getenv('DATA_DIR', str(BASE_DIR)))
+# The built React app (frontend/dist). When this is set, the server also serves the site, from the
+# same address as the API (the cloud set-up, see Dockerfile); otherwise the Vite dev server does.
+FRONTEND_DIST = Path(os.environ['FRONTEND_DIST']) if os.getenv('FRONTEND_DIST') else None
 
 
 def _env_list(name, default):
@@ -24,6 +31,8 @@ DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 if not DEBUG and SECRET_KEY in DEV_SECRET_KEYS:
     raise ImproperlyConfigured('Set a real SECRET_KEY in backend/.env (or set DEBUG=True for local development).')
 ALLOWED_HOSTS = _env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1')
+if os.getenv('RENDER_EXTERNAL_HOSTNAME'):   # set by Render: the service's onrender.com address
+    ALLOWED_HOSTS.append(os.getenv('RENDER_EXTERNAL_HOSTNAME'))
 ROOT_URLCONF = 'ocris_backend.urls'
 WSGI_APPLICATION = 'ocris_backend.wsgi.application'
 AUTH_USER_MODEL = 'api.OCRISUser'
@@ -51,6 +60,9 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+# Django's admin site is off outside local development: changes made there skip the audit log and
+# its sign-in has no limit on wrong passwords. ENABLE_DJANGO_ADMIN=True turns it on.
+ENABLE_DJANGO_ADMIN = os.getenv('ENABLE_DJANGO_ADMIN', str(DEBUG)).lower() == 'true'
 
 TEMPLATES = [{
     'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -71,6 +83,7 @@ TEMPLATES = [{
 REQUIRE_HTTPS = os.getenv('REQUIRE_HTTPS', str(not DEBUG)).lower() == 'true'
 if REQUIRE_HTTPS:
     SECURE_SSL_REDIRECT = True
+    SECURE_REDIRECT_EXEMPT = [r'^api/health/$']   # the host's health check comes over plain HTTP
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')   # set by the host's load balancer
     SECURE_HSTS_SECONDS = 60 * 60 * 24 * 30
     SESSION_COOKIE_SECURE = True
@@ -93,7 +106,7 @@ elif not DEBUG:
 
 # ── Databases ────────────────────────────────────────────────────────────────
 # SQLite holds Django auth (users, tokens); MongoDB holds records, scans and the audit log.
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': DATA_DIR / 'db.sqlite3'}}
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017')
 MONGO_DB_NAME = os.getenv('MONGO_DB_NAME', 'ocris_bcs')
 
@@ -109,7 +122,8 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 20,
 }
 AUTH_COOKIE_NAME = 'ocris_session'
-AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'None' if REQUIRE_HTTPS else 'Lax')
+# Lax when the site and the API share one address (FRONTEND_DIST set); None only when they cannot
+AUTH_COOKIE_SAMESITE = os.getenv('AUTH_COOKIE_SAMESITE', 'None' if REQUIRE_HTTPS and not FRONTEND_DIST else 'Lax')
 REQUEST_HEADER = 'X-OCRIS-Request'
 # Hours a login stays valid
 TOKEN_TTL_HOURS = float(os.getenv('TOKEN_TTL_HOURS', '12'))
@@ -133,16 +147,30 @@ AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'api.password_validators.LetterAndDigitValidator'},
 ]
 
-CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000')
+# Other addresses allowed to call the API from a browser. None are needed when this server also
+# serves the site; the Vite dev server's addresses are allowed in local development only.
+CORS_ALLOWED_ORIGINS = _env_list('CORS_ALLOWED_ORIGINS', 'http://localhost:3000,http://127.0.0.1:3000' if DEBUG else '')
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOW_HEADERS = [*default_headers, REQUEST_HEADER.lower()]
 CORS_EXPOSE_HEADERS = ['Content-Disposition']  # lets the frontend read download filenames
 
 # ── Files ────────────────────────────────────────────────────────────────────
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = DATA_DIR / 'media'
+BACKUP_DIR = DATA_DIR / 'backups'
 STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+if FRONTEND_DIST:
+    # WhiteNoise serves the built site: index.html at / (never cached, so a deploy shows at once) and
+    # the files under /assets/, whose names change with their content, cached for good.
+    from .frontend import add_headers, is_immutable
+    MIDDLEWARE.insert(MIDDLEWARE.index('django.middleware.security.SecurityMiddleware') + 1,
+                      'whitenoise.middleware.WhiteNoiseMiddleware')
+    WHITENOISE_ROOT = FRONTEND_DIST
+    WHITENOISE_INDEX_FILE = True
+    WHITENOISE_IMMUTABLE_FILE_TEST = is_immutable
+    WHITENOISE_ADD_HEADERS_FUNCTION = add_headers
 # Largest scan accepted, in MB. Larger uploads are refused before they are read or stored.
 MAX_UPLOAD_MB = float(os.getenv('MAX_UPLOAD_MB', '20'))
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
@@ -155,19 +183,25 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024   # bigger uploads are streamed to
 PENDING_SCAN_DAYS = int(os.getenv('PENDING_SCAN_DAYS', '7'))
 # How many backup files `manage.py maintenance` (or `backup --keep`) leaves in the backups folder.
 BACKUP_KEEP = int(os.getenv('BACKUP_KEEP', '14'))
+# Hour of the day (Manila time, 0-23) at which `manage.py maintenance_loop` runs the upkeep. The
+# cloud container starts that loop; on a school server, schedule `maintenance` instead.
+MAINTENANCE_HOUR = int(os.getenv('MAINTENANCE_HOUR', '2'))
 
 # ── Audit trail ──────────────────────────────────────────────────────────────
 # Every audit entry is also appended to this file (one JSON object per line, each holding the hash
 # of the one before it; see api/services/audit_chain.py), so the trail survives if the database is
 # wiped or replaced. Keep it on storage that is not wiped on deploy. The tests never write to it,
 # even when .env names a file, so their entries cannot join the school's trail.
-AUDIT_LOG_FILE = Path(os.devnull if 'test' in sys.argv else os.getenv('AUDIT_LOG_FILE', str(BASE_DIR / 'logs' / 'audit.jsonl')))
+AUDIT_LOG_FILE = Path(os.devnull if 'test' in sys.argv else os.getenv('AUDIT_LOG_FILE', str(DATA_DIR / 'logs' / 'audit.jsonl')))
 
 # ── OCR ──────────────────────────────────────────────────────────────────────
 # A grade read from a scan is auto-approved only above this confidence (%); anything else is
 # flagged for a person to check. Lower it in .env to review less, at more risk of a wrong grade.
 OCR_CONFIDENCE_THRESHOLD = float(os.getenv('OCR_CONFIDENCE_THRESHOLD', '90'))
 OCR_LANG = 'eng'
+# Forms read at the same time by one server process (each takes about 300 MB); further uploads wait.
+# The cloud container runs 2 processes, so 2 here means at most 4 forms at once on a 2 GB instance.
+OCR_MAX_CONCURRENT = int(os.getenv('OCR_MAX_CONCURRENT', '2'))
 # Full path to tesseract.exe if it isn't on PATH (Windows), e.g. C:\Program Files\Tesseract-OCR\tesseract.exe
 TESSERACT_CMD = os.getenv('TESSERACT_CMD', '')
 

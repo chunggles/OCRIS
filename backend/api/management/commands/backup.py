@@ -19,7 +19,7 @@ class Command(BaseCommand):
     help = 'Back up the accounts database, the MongoDB collections and the uploaded scans into a zip file.'
 
     def add_arguments(self, parser):
-        parser.add_argument('--out', default=str(Path(settings.BASE_DIR) / 'backups'), help='Folder to write the zip into.')
+        parser.add_argument('--out', default=str(settings.BACKUP_DIR), help='Folder to write the zip into.')
         parser.add_argument('--keep', type=int, default=None,
                             help='Afterwards delete all but the newest N backup files in that folder (default: keep all).')
 

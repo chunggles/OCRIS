@@ -415,11 +415,17 @@ def delete_user_in_mongo(username):
 
 
 def sync_users_to_mongo(users):
+    """Make the mirror match every account: `users` is the whole list, so profiles not in it are removed
+    (accounts deleted outside the app, through the shell or the admin site)."""
     for user in users:
         try:
             upsert_user_in_mongo(user)
         except Exception as e:
             logger.warning(f"User sync failed: {user.get('username')}: {e}")
+    try:
+        users_col().delete_many({'username': {'$nin': [user['username'] for user in users]}})
+    except Exception as e:
+        logger.warning(f'User sync could not remove deleted accounts: {e}')
 
 
 # ── Sections ─────────────────────────────────────────────────────────────────

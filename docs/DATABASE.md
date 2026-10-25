@@ -199,7 +199,7 @@ The section tree: one document per grade level, holding its sections. Records an
 
 ### `users`
 
-A mirror of the SQLite user table, without passwords. It is refreshed when the user list is viewed and when a user is created, edited or deleted. SQLite is the source of truth; nothing reads this collection.
+A mirror of the SQLite user table, without passwords. It is refreshed when the user list is viewed and when a user is created, edited or deleted. Viewing the user list also removes profiles whose account no longer exists (deleted through the shell or the admin site). SQLite is the source of truth; nothing reads this collection.
 
 | Field | Type | Description |
 |---|---|---|
